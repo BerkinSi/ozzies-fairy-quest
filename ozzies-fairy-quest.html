@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Ozzie's Fairy Quest</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0015;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        canvas {
+            border-radius: 8px;
+            box-shadow: 0 0 30px rgba(147, 51, 234, 0.4);
+        }
+        /* Mobile Controls */
+        #mobile-controls {
+            display: none;
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            height: 160px;
+            z-index: 9999;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #mobile-controls.visible { display: flex; justify-content: space-between; align-items: flex-end; padding: 10px 20px; }
+        .dpad { pointer-events: auto; display: grid; grid-template-columns: 55px 55px 55px; grid-template-rows: 55px 55px; gap: 4px; }
+        .dpad-btn {
+            width: 55px; height: 55px; border: none; border-radius: 10px;
+            background: rgba(255,255,255,0.18); color: #fff; font-size: 22px;
+            display: flex; align-items: center; justify-content: center;
+            touch-action: none; -webkit-tap-highlight-color: transparent;
+            pointer-events: auto;
+        }
+        .dpad-btn:active, .dpad-btn.pressed { background: rgba(255,255,255,0.45); }
+        .dpad-btn.empty { background: transparent; pointer-events: none; }
+        #btn-fire {
+            pointer-events: auto; width: 75px; height: 75px; border: none; border-radius: 50%;
+            background: rgba(255,100,50,0.35); color: #fff; font-size: 28px;
+            display: flex; align-items: center; justify-content: center;
+            touch-action: none; -webkit-tap-highlight-color: transparent;
+            margin-bottom: 10px;
+        }
+        #btn-fire:active, #btn-fire.pressed { background: rgba(255,100,50,0.65); }
+    </style>
+</head>
+<body>
+<div id="mobile-controls">
+    <div class="dpad">
+        <div class="dpad-btn empty"></div>
+        <button class="dpad-btn" id="btn-up">▲</button>
+        <div class="dpad-btn empty"></div>
+        <button class="dpad-btn" id="btn-left">◄</button>
+        <div class="dpad-btn empty"></div>
+        <button class="dpad-btn" id="btn-right">►</button>
+        <div class="dpad-btn empty"></div>
+        <button class="dpad-btn" id="btn-down">▼</button>
+        <div class="dpad-btn empty"></div>
+    </div>
+    <button id="btn-fire">🔥</button>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
+<script>
+
+const W = 800, H = 600;
+const FAIRY_SPEED = 160;
+
+// ==========================================
+// MOBILE TOUCH CONTROLS
+// ==========================================
+const TOUCH = { up: false, down: false, left: false, right: false, fire: false, active: false };
+
+(function setupMobile() {
+    const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (isTouchDevice) {
+        TOUCH.active = true;
+        document.getElementById('mobile-controls').classList.add('visible');
+    }
+    const dirs = { 'btn-up': 'up', 'btn-down': 'down', 'btn-left': 'left', 'btn-right': 'right' };
+    Object.keys(dirs).forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const dir = dirs[id];
+        el.addEventListener('touchstart', (e) => { e.preventDefault(); TOUCH[dir] = true; el.classList.add('pressed'); }, { passive: false });
+        el.addEventListener('touchend', (e) => { e.preventDefault(); TOUCH[dir] = false; el.classList.remove('pressed'); }, { passive: false });
+        el.addEventListener('touchcancel', () => { TOUCH[dir] = false; el.classList.remove('pressed'); });
+        // Also support mouse for testing
+        el.addEventListener('mousedown', (e) => { e.preventDefault(); TOUCH[dir] = true; el.classList.add('pressed'); });
+        el.addEventListener('mouseup', () => { TOUCH[dir] = false; el.classList.remove('pressed'); });
+        el.addEventListener('mouseleave', () => { TOUCH[dir] = false; el.classList.remove('pressed'); });
+    });
+    const fireBtn = document.getElementById('btn-fire');
+    if (fireBtn) {
+        fireBtn.addEventListener('touchstart', (e) => { e.preventDefault(); TOUCH.fire = true; fireBtn.classList.add('pressed'); }, { passive: false });
+        fireBtn.addEventListener('touchend', (e) => { e.preventDefault(); TOUCH.fire = false; fireBtn.classList.remove('pressed'); }, { passive: false });
+        fireBtn.addEventListener('touchcancel', () => { TOUCH.fire = false; fireBtn.classList.remove('pressed'); });
+        fireBtn.addEventListener('mousedown', (e) => { e.preventDefault(); TOUCH.fire = true; });
+        fireBtn.addEventListener('mouseup', () => { TOUCH.fire = false; });
+    }
+})();
+
+// ==========================================
+// SHARED GAME STATE
+// ==========================================
+const STATE = {
+    powers: [],
+    health: 5,
+    maxHealth: 5,
+};
+
+// ==========================================
+// DIALOG SYSTEM
+// ==========================================
+function showDialog(scene, messages, onComplete) {
+    if (scene._dialogActive) return;
+    scene._dialogActive = true;
+    scene._dialogBlocked = true;
+
+    let idx = 0;
+    const D = 2000;
+
+    const bg = scene.add.rectangle(W / 2, H - 70, W - 40, 120, 0x000000, 0.88)
+        .setStrokeStyle(2, 0x8844cc).setDepth(D);
+    const speaker = scene.add.text(40, H - 122, '', {
+        fontSize: '16px', color: '#ffd700', fontStyle: 'bold'
+    }).setDepth(D + 1);
+    const body = scene.add.text(40, H - 98, '', {
+        fontSize: '15px', color: '#ffffff',
+        wordWrap: { width: W - 90 }, lineSpacing: 4
+    }).setDepth(D + 1);
+    const hint = scene.add.text(W - 55, H - 22, 'click ▶', {
+        fontSize: '11px', color: '#777'
+    }).setDepth(D + 1);
+    scene.tweens.add({ targets: hint, alpha: 0.3, duration: 500, yoyo: true, repeat: -1 });
+
+    function show() {
+        const m = messages[idx];
+        if (typeof m === 'string') { speaker.setText(''); body.setText(m); }
+        else { speaker.setText(m.speaker || ''); body.setText(m.text || ''); }
+    }
+
+    function advance() {
+        if (!scene._dialogActive) return;
+        idx++;
+        if (idx >= messages.length) {
+            bg.destroy(); speaker.destroy(); body.destroy(); hint.destroy();
+            scene._dialogActive = false;
+            scene._dialogBlocked = false;
+            scene.input.off('pointerdown', advance);
+            if (onComplete) onComplete();
+        } else { show(); }
+    }
+
+    show();
+    scene.input.on('pointerdown', advance);
+}
+
+// ==========================================
+// CREATE FAIRY
+// ==========================================
+function createFairy(scene, x, y, bc, wc, float) {
+    bc = bc || 0x88ff88; wc = wc || 0xaaffaa;
+    if (float === undefined) float = true;
+    const c = scene.add.container(x, y);
+    c.add(scene.add.circle(0, 0, 18, 0xffff88, 0.12));
+    c.add(scene.add.ellipse(0, 2, 14, 18, bc));
+    c.add(scene.add.circle(0, -10, 7, 0xffddbb));
+    c.add(scene.add.circle(-3, -11, 1.5, 0x000000));
+    c.add(scene.add.circle(3, -11, 1.5, 0x000000));
+    const lw = scene.add.ellipse(-11, -2, 10, 18, wc, 0.6);
+    const rw = scene.add.ellipse(11, -2, 10, 18, wc, 0.6);
+    c.add(lw); c.add(rw);
+    scene.tweens.add({ targets: [lw, rw], scaleX: { from: 1, to: 0.4 }, duration: 180, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    if (float) { scene.tweens.add({ targets: c, y: y - 4, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }); }
+    c.setSize(24, 28);
+    return c;
+}
+
+// ==========================================
+// SPARKLE EFFECT
+// ==========================================
+function sparkles(scene, x, y, n, color) {
+    n = n || 10; color = color || 0xffdd44;
+    for (let i = 0; i < n; i++) {
+        const s = scene.add.circle(
+            x + Phaser.Math.Between(-30, 30),
+            y + Phaser.Math.Between(-30, 30),
+            Phaser.Math.Between(1, 3), color, 0.8
+        ).setDepth(1500);
+        scene.tweens.add({
+            targets: s, alpha: 0, y: s.y - 20, scaleX: 0, scaleY: 0,
+            duration: Phaser.Math.Between(400, 800),
+            delay: Phaser.Math.Between(0, 200),
+            onComplete: () => s.destroy()
+        });
+    }
+}
+
+// ==========================================
+// DRAW TREE
+// ==========================================
+function drawTree(scene, x, y) {
+    scene.add.rectangle(x, y + 12, 8, 22, 0x8B4513);
+    scene.add.circle(x, y - 5, 16, 0x228B22);
+    scene.add.circle(x - 4, y - 9, 6, 0x32CD32, 0.5);
+}
+
+// ==========================================
+// DRAW CASTLE
+// ==========================================
+function drawCastle(scene, x, y, c1, c2) {
+    scene.add.rectangle(x, y, 120, 100, c1).setStrokeStyle(2, c2);
+    scene.add.rectangle(x - 50, y - 20, 30, 60, c2);
+    scene.add.rectangle(x + 50, y - 20, 30, 60, c2);
+    scene.add.triangle(x - 50, y - 55, 0, 20, 10, 0, 20, 20, c2);
+    scene.add.triangle(x + 50, y - 55, 0, 20, 10, 0, 20, 20, c2);
+    scene.add.rectangle(x, y + 25, 25, 35, c2);
+    scene.add.rectangle(x - 20, y - 10, 12, 12, 0xffff88, 0.8);
+    scene.add.rectangle(x + 20, y - 10, 12, 12, 0xffff88, 0.8);
+}
+
+// ==========================================
+// TITLE SCENE
+// ==========================================
+class TitleScene extends Phaser.Scene {
+    constructor() { super('TitleScene'); }
+    create() {
+        const bg = this.add.graphics();
+        bg.fillGradientStyle(0x1a0a3e, 0x1a0a3e, 0x0a2040, 0x0a2040, 1);
+        bg.fillRect(0, 0, W, H);
+
+        for (let i = 0; i < 80; i++) {
+            const st = this.add.circle(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H),
+                Phaser.Math.Between(1, 2), 0xffffff, Phaser.Math.FloatBetween(0.3, 0.9));
+            this.tweens.add({ targets: st, alpha: Phaser.Math.FloatBetween(0.1, 0.4),
+                duration: Phaser.Math.Between(1000, 3000), yoyo: true, repeat: -1 });
+        }
+
+        const title = this.add.text(W / 2, 150, "Ozzie's Fairy Quest", {
+            fontSize: '48px', fontFamily: 'Georgia, serif', color: '#ffd700',
+            fontStyle: 'bold', stroke: '#8B6914', strokeThickness: 4
+        }).setOrigin(0.5);
+        this.tweens.add({ targets: title, alpha: { from: 1, to: 0.85 }, duration: 1500, yoyo: true, repeat: -1 });
+
+        this.add.text(W / 2, 210, 'Game Designed by Ozan', {
+            fontSize: '18px', color: '#bb88ff', fontStyle: 'italic'
+        }).setOrigin(0.5);
+
+        const fairy = createFairy(this, W / 2, 310);
+        fairy.setDepth(10);
+        this.tweens.add({ targets: fairy, x: { from: W / 2 - 80, to: W / 2 + 80 },
+            duration: 3000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+        this.time.addEvent({
+            delay: 300, loop: true, callback: () => {
+                const sx = Phaser.Math.Between(100, W - 100), sy = Phaser.Math.Between(100, 400);
+                const sp = this.add.circle(sx, sy, 2, 0xffdd44, 0.7);
+                this.tweens.add({ targets: sp, alpha: 0, scaleX: 0, scaleY: 0, y: sy - 15, duration: 800, onComplete: () => sp.destroy() });
+            }
+        });
+
+        const btnBg = this.add.rectangle(W / 2, 430, 180, 55, 0x44aa44)
+            .setStrokeStyle(3, 0x66dd66).setInteractive({ useHandCursor: true });
+        const btnTxt = this.add.text(W / 2, 430, 'PLAY', {
+            fontSize: '28px', color: '#ffffff', fontStyle: 'bold'
+        }).setOrigin(0.5);
+        btnBg.on('pointerover', () => { btnBg.setFillStyle(0x55cc55); btnTxt.setScale(1.1); });
+        btnBg.on('pointerout', () => { btnBg.setFillStyle(0x44aa44); btnTxt.setScale(1); });
+        this.tweens.add({ targets: btnBg, scaleX: 1.05, scaleY: 1.05, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        btnBg.on('pointerdown', () => {
+            this.cameras.main.fadeOut(500, 0, 0, 0);
+            this.time.delayedCall(500, () => this.scene.start('Chapter1Scene'));
+        });
+
+        this.add.text(W / 2, 530, 'Built with love by Uncle Berkin', { fontSize: '13px', color: '#666688' }).setOrigin(0.5);
+        this.add.text(W / 2, 555, 'Happy Birthday Ozzie!', { fontSize: '14px', color: '#887799' }).setOrigin(0.5);
+    }
+}
+
+// ==========================================
+// CHAPTER 1: THE FIRE FAIRY CASTLE
+// ==========================================
+class Chapter1Scene extends Phaser.Scene {
+    constructor() { super('Chapter1Scene'); }
+
+    create() {
+        this.cameras.main.fadeIn(500);
+        this._dialogActive = false;
+        this._dialogBlocked = false;
+        this.phase = 'explore';
+        this.hasKey = false;
+        this.chestOpened = false;
+
+        const chT = this.add.text(W / 2, H / 2, 'Chapter 1\nThe Fire Fairy Castle', {
+            fontSize: '32px', fontFamily: 'Georgia', color: '#ff8844',
+            fontStyle: 'bold', align: 'center', lineSpacing: 10
+        }).setOrigin(0.5).setAlpha(0).setDepth(3000);
+        this.tweens.add({
+            targets: chT, alpha: 1, duration: 800, yoyo: true, hold: 1500,
+            onComplete: () => { chT.destroy(); this.buildWorld(); }
+        });
+
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd = this.input.keyboard.addKeys({ up: 'W', down: 'S', left: 'A', right: 'D' });
+    }
+
+    buildWorld() {
+        // Grass
+        this.add.rectangle(W / 2, H / 2, W, H, 0x2d5a1e);
+        for (let i = 0; i < 50; i++) {
+            this.add.circle(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H),
+                Phaser.Math.Between(2, 5), 0x3a7a2a, 0.4);
+        }
+        // Dirt paths
+        this.add.rectangle(400, 480, 50, 240, 0x8B7355, 0.5);
+        this.add.rectangle(620, 330, 350, 35, 0x8B7355, 0.4);
+
+        // Castles
+        drawCastle(this, 150, 80, 0x4488cc, 0x2255aa);
+        this.add.text(150, 25, 'Ice Castle', { fontSize: '11px', color: '#aaccff' }).setOrigin(0.5);
+        drawCastle(this, 630, 80, 0xcc4422, 0x882211);
+        this.add.text(630, 25, 'Fire Castle', { fontSize: '11px', color: '#ffaa88' }).setOrigin(0.5);
+
+        // Laser fence
+        this.laserFence = this.add.rectangle(390, 90, 6, 170, 0xff00ff, 0.7).setDepth(5);
+        this.tweens.add({ targets: this.laserFence, alpha: { from: 0.4, to: 0.9 }, duration: 400, yoyo: true, repeat: -1 });
+        this.add.rectangle(390, 90, 14, 170, 0xff00ff, 0.12).setDepth(4);
+
+        // Walls (physics)
+        this.walls = this.physics.add.staticGroup();
+        // Ice castle
+        this.mkWall(150, 80, 140, 120);
+        // Fire castle — block front & top, leave right side open
+        this.mkWall(630, 30, 140, 10);   // top
+        this.mkWall(565, 85, 10, 120);   // left (front)
+        this.mkWall(630, 145, 90, 10);   // bottom partial
+        // Laser fence
+        this.mkWall(390, 90, 12, 170);
+        // Boundaries
+        this.mkWall(W / 2, -5, W, 10);
+        this.mkWall(W / 2, H + 5, W, 10);
+        this.mkWall(-5, H / 2, 10, H);
+        this.mkWall(W + 5, H / 2, 10, H);
+
+        // Trees
+        const tp = [
+            [50, 250], [110, 310], [70, 400], [30, 470],
+            [190, 360], [240, 440], [170, 510],
+            [310, 260], [350, 330], [300, 420],
+            [480, 270], [460, 370], [520, 320],
+            [290, 530], [180, 570], [430, 540], [550, 500],
+        ];
+        tp.forEach(([tx, ty]) => { drawTree(this, tx, ty); this.mkWall(tx, ty + 5, 14, 14); });
+
+        // Chest
+        this.chestRect = this.add.rectangle(710, 160, 26, 20, 0x8B4513)
+            .setStrokeStyle(2, 0xDAA520).setDepth(10);
+        this.chestIcon = this.add.text(710, 140, '🔒', { fontSize: '16px' }).setOrigin(0.5).setDepth(11);
+
+        // Maze entrance
+        this.add.rectangle(755, 220, 32, 32, 0x554433).setStrokeStyle(2, 0x887766).setDepth(5);
+        this.add.text(755, 205, 'MAZE', { fontSize: '9px', color: '#ffddaa', fontStyle: 'bold' }).setOrigin(0.5).setDepth(6);
+        // Arrow indicator
+        const arrow = this.add.text(755, 245, '▲', { fontSize: '12px', color: '#ffdd44' }).setOrigin(0.5).setDepth(6);
+        this.tweens.add({ targets: arrow, y: 240, duration: 500, yoyo: true, repeat: -1 });
+
+        // Player
+        this.player = createFairy(this, 400, 520, 0x88ff88, 0xaaffaa, false);
+        this.player.setDepth(100);
+        this.physics.add.existing(this.player);
+        this.player.body.setSize(20, 24);
+        this.player.body.setCollideWorldBounds(true);
+        this.wallCollider = this.physics.add.collider(this.player, this.walls);
+
+        // HUD
+        this.add.text(10, 10, 'Chapter 1: Fire Fairy Castle', {
+            fontSize: '14px', color: '#ffdd88', fontStyle: 'bold'
+        }).setDepth(1000);
+        this.add.text(10, 28, TOUCH.active ? 'Use the D-pad to move' : 'Arrow keys / WASD to move', {
+            fontSize: '11px', color: '#aaaaaa'
+        }).setDepth(1000);
+
+        // Intro dialog
+        this.time.delayedCall(400, () => {
+            showDialog(this, [
+                { speaker: 'Fairy', text: 'Two castles! The Fire Fairy Castle and the Ice Fairy Castle!' },
+                { speaker: 'Fairy', text: "They won't let me in through the front. I need to sneak in from behind!" },
+                TOUCH.active ? 'Use the D-pad to move. Find the maze behind the Fire Castle!' : 'Use arrow keys or WASD to move. Find the maze behind the Fire Castle!'
+            ]);
+        });
+    }
+
+    mkWall(x, y, w, h) {
+        const r = this.add.rectangle(x, y, w, h, 0x000000, 0);
+        this.physics.add.existing(r, true);
+        this.walls.add(r);
+    }
+
+    update() {
+        if (!this.player || !this.player.body) return;
+        if (this._dialogBlocked) { this.player.body.setVelocity(0); return; }
+
+        if (this.phase === 'explore' || this.phase === 'hasKey') {
+            let vx = 0, vy = 0;
+            if (this.cursors.left.isDown || this.wasd.left.isDown || TOUCH.left) vx = -FAIRY_SPEED;
+            if (this.cursors.right.isDown || this.wasd.right.isDown || TOUCH.right) vx = FAIRY_SPEED;
+            if (this.cursors.up.isDown || this.wasd.up.isDown || TOUCH.up) vy = -FAIRY_SPEED;
+            if (this.cursors.down.isDown || this.wasd.down.isDown || TOUCH.down) vy = FAIRY_SPEED;
+            this.player.body.setVelocity(vx, vy);
+
+            // Lean
+            if (vx < 0) this.player.setAngle(-8);
+            else if (vx > 0) this.player.setAngle(8);
+            else this.player.setAngle(0);
+
+            // Trail
+            if ((vx || vy) && Phaser.Math.Between(0, 4) === 0) {
+                const sp = this.add.circle(this.player.x, this.player.y + 10, 2, 0xffdd44, 0.4).setDepth(99);
+                this.tweens.add({ targets: sp, alpha: 0, scaleX: 0, scaleY: 0, duration: 400, onComplete: () => sp.destroy() });
+            }
+
+            // Maze entrance
+            if (this.phase === 'explore' && !this._dialogActive) {
+                const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, 755, 220);
+                if (d < 30) {
+                    this.phase = 'enteringMaze';
+                    this.player.body.setVelocity(0);
+                    showDialog(this, [
+                        { speaker: 'Fairy', text: 'A maze! The key must be inside!' },
+                        'Tip: Try following the left wall!'
+                    ], () => this.startMaze());
+                }
+            }
+
+            // Chest
+            if (this.hasKey && !this.chestOpened && !this._dialogActive) {
+                const cd = Phaser.Math.Distance.Between(this.player.x, this.player.y, 710, 160);
+                if (cd < 35) this.openChest();
+            }
+        }
+
+        if (this.phase === 'maze') {
+            let vx = 0, vy = 0;
+            if (this.cursors.left.isDown || this.wasd.left.isDown || TOUCH.left) vx = -FAIRY_SPEED;
+            if (this.cursors.right.isDown || this.wasd.right.isDown || TOUCH.right) vx = FAIRY_SPEED;
+            if (this.cursors.up.isDown || this.wasd.up.isDown || TOUCH.up) vy = -FAIRY_SPEED;
+            if (this.cursors.down.isDown || this.wasd.down.isDown || TOUCH.down) vy = FAIRY_SPEED;
+            this.player.body.setVelocity(vx, vy);
+            if (vx < 0) this.player.setAngle(-8);
+            else if (vx > 0) this.player.setAngle(8);
+            else this.player.setAngle(0);
+        }
+    }
+
+    startMaze() {
+        this.phase = 'maze';
+        this.wallCollider.active = false;
+
+        this.mazeOverlay = this.add.rectangle(W / 2, H / 2, W, H, 0x1a1a2e, 0.97).setDepth(500);
+        this.mazeTitle = this.add.text(W / 2, 18, 'THE MAZE', { fontSize: '20px', color: '#ffdd88', fontStyle: 'bold' }).setOrigin(0.5).setDepth(510);
+        this.mazeHint = this.add.text(W / 2, 42, 'Find the key! Hint: follow the left wall', { fontSize: '12px', color: '#999' }).setOrigin(0.5).setDepth(510);
+
+        const MAZE = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [0,0,0,1,0,0,0,0,0,1,0,0,1],
+            [1,1,0,1,0,1,1,1,0,1,0,1,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,1],
+            [1,0,1,1,1,1,0,1,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,1,0,1],
+            [1,1,1,1,1,0,1,1,1,0,1,0,1],
+            [1,0,0,0,0,0,1,0,0,0,0,0,1],
+            [1,0,1,1,1,1,1,0,1,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,0,0,2,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        ];
+        const cs = 45;
+        const ox = (W - MAZE[0].length * cs) / 2;
+        const oy = 58;
+
+        this.mazeWalls = this.physics.add.staticGroup();
+        this.mazeEls = [];
+
+        let keyPos = null;
+
+        for (let r = 0; r < MAZE.length; r++) {
+            for (let c = 0; c < MAZE[r].length; c++) {
+                const x = ox + c * cs + cs / 2;
+                const y = oy + r * cs + cs / 2;
+                if (MAZE[r][c] === 1) {
+                    const w = this.add.rectangle(x, y, cs - 1, cs - 1, 0x443366).setStrokeStyle(1, 0x554477).setDepth(501);
+                    this.mazeEls.push(w);
+                    this.physics.add.existing(w, true);
+                    this.mazeWalls.add(w);
+                } else {
+                    const f = this.add.rectangle(x, y, cs - 1, cs - 1, 0x252540, 0.5).setDepth(501);
+                    this.mazeEls.push(f);
+                    if (MAZE[r][c] === 2) {
+                        keyPos = { x, y };
+                        this.mazeKeyIcon = this.add.text(x, y, '🔑', { fontSize: '22px' }).setOrigin(0.5).setDepth(520);
+                        this.mazeEls.push(this.mazeKeyIcon);
+                        this.time.addEvent({
+                            delay: 600, loop: true,
+                            callback: () => { if (this.mazeKeyIcon && this.mazeKeyIcon.active) sparkles(this, this.mazeKeyIcon.x, this.mazeKeyIcon.y, 2, 0xffd700); }
+                        });
+                    }
+                }
+            }
+        }
+
+        // Player at maze entrance
+        const startX = ox + 0 * cs + cs / 2;
+        const startY = oy + 1 * cs + cs / 2;
+        this.player.setPosition(startX, startY);
+        this.player.setDepth(510);
+        this.mazeCollider = this.physics.add.collider(this.player, this.mazeWalls);
+
+        // Key pickup
+        if (keyPos) {
+            const kz = this.add.zone(keyPos.x, keyPos.y, cs, cs).setDepth(505);
+            this.physics.add.existing(kz, true);
+            this.mazeEls.push(kz);
+            this.physics.add.overlap(this.player, kz, () => {
+                if (!this.hasKey && !this._dialogActive) {
+                    this.hasKey = true;
+                    if (this.mazeKeyIcon) this.mazeKeyIcon.destroy();
+                    sparkles(this, keyPos.x, keyPos.y, 20, 0xffd700);
+                    this.player.body.setVelocity(0);
+                    showDialog(this, [
+                        { speaker: 'Fairy', text: 'I found the key! Now back to the chest!' }
+                    ], () => this.exitMaze());
+                }
+            });
+        }
+    }
+
+    exitMaze() {
+        this.mazeEls.forEach(e => { if (e && e.active) e.destroy(); });
+        if (this.mazeOverlay) this.mazeOverlay.destroy();
+        if (this.mazeTitle) this.mazeTitle.destroy();
+        if (this.mazeHint) this.mazeHint.destroy();
+        if (this.mazeCollider) this.mazeCollider.active = false;
+        this.mazeWalls.clear(true, true);
+        this.wallCollider.active = true;
+        this.player.setPosition(710, 200);
+        this.player.setDepth(100);
+        this.phase = 'hasKey';
+        this.chestIcon.setText('🔑');
+        // Arrow to chest
+        const arr = this.add.text(710, 130, '⬇ chest', { fontSize: '12px', color: '#ffdd44' }).setOrigin(0.5).setDepth(15);
+        this.tweens.add({ targets: arr, y: 135, duration: 400, yoyo: true, repeat: -1 });
+    }
+
+    openChest() {
+        this.chestOpened = true;
+        this.phase = 'done';
+        this.player.body.setVelocity(0);
+        this.chestRect.setFillStyle(0xDAA520);
+        this.chestIcon.setText('✨');
+        sparkles(this, 710, 160, 30, 0xffd700);
+        STATE.powers.push('Teleportation', 'Fire Arrow', 'Fire Sword', 'Fireball');
+        showDialog(this, [
+            { speaker: 'Fairy', text: 'The chest is open! Amazing powers inside!' },
+            '🌀 Teleportation Power acquired!',
+            '🏹 Fire Arrow acquired!',
+            '⚔️ Fire Sword acquired!',
+            '🔥 Fireball Power acquired!',
+            { speaker: 'Fairy', text: "With teleportation I can reach the Ice Fairy Castle! Let's go!" }
+        ], () => this.chapterDone());
+    }
+
+    chapterDone() {
+        const ov = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(3000);
+        this.tweens.add({
+            targets: ov, alpha: 0.85, duration: 800,
+            onComplete: () => {
+                this.add.text(W / 2, 200, 'Chapter 1 Complete!', {
+                    fontSize: '36px', fontFamily: 'Georgia', color: '#ffd700', fontStyle: 'bold'
+                }).setOrigin(0.5).setDepth(3001);
+                this.add.text(W / 2, 260, '🌀 Teleportation   🏹 Fire Arrow   ⚔️ Fire Sword   🔥 Fireball', {
+                    fontSize: '14px', color: '#ffaa44'
+                }).setOrigin(0.5).setDepth(3001);
+                const b = this.add.rectangle(W / 2, 380, 200, 50, 0x44aa44)
+                    .setStrokeStyle(2, 0x66cc66).setDepth(3001).setInteractive({ useHandCursor: true });
+                this.add.text(W / 2, 380, 'Continue →', { fontSize: '22px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(3002);
+                b.on('pointerdown', () => {
+                    this.cameras.main.fadeOut(500);
+                    this.time.delayedCall(500, () => this.scene.start('Chapter2Scene'));
+                });
+            }
+        });
+    }
+}
+
+// ==========================================
+// CHAPTER 2: THE ICE FAIRY CASTLE
+// ==========================================
+class Chapter2Scene extends Phaser.Scene {
+    constructor() { super('Chapter2Scene'); }
+
+    create() {
+        this.cameras.main.fadeIn(500);
+        this._dialogActive = false;
+        this._dialogBlocked = false;
+        this.phase = 'intro';
+        this.bossHP = 6;
+        this.bossMaxHP = 6;
+        this.playerHP = 5;
+        this.cooldown = 0;
+
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd = this.input.keyboard.addKeys({ up: 'W', down: 'S', left: 'A', right: 'D' });
+
+        // Teleport flash
+        const fl = this.add.rectangle(W / 2, H / 2, W, H, 0x8844ff, 1).setDepth(4000);
+        this.tweens.add({ targets: fl, alpha: 0, duration: 600, onComplete: () => fl.destroy() });
+
+        const chT = this.add.text(W / 2, H / 2, 'Chapter 2\nThe Ice Fairy Castle', {
+            fontSize: '32px', fontFamily: 'Georgia', color: '#44ccff',
+            fontStyle: 'bold', align: 'center', lineSpacing: 10
+        }).setOrigin(0.5).setAlpha(0).setDepth(3000);
+        this.tweens.add({ targets: chT, alpha: 1, duration: 800, yoyo: true, hold: 1500,
+            onComplete: () => { chT.destroy(); this.startBattle(); } });
+    }
+
+    startBattle() {
+        // Icy background
+        const bg = this.add.graphics();
+        bg.fillGradientStyle(0x0a1530, 0x0a1530, 0x1a3060, 0x1a3060);
+        bg.fillRect(0, 0, W, H);
+        drawCastle(this, W / 2, 80, 0x4488cc, 0x2255aa);
+        this.add.rectangle(W / 2, H - 30, W, 60, 0x88bbdd, 0.2);
+
+        // Snow
+        this.time.addEvent({
+            delay: 200, loop: true, callback: () => {
+                const sn = this.add.circle(Phaser.Math.Between(0, W), -5,
+                    Phaser.Math.Between(1, 3), 0xffffff, 0.5);
+                this.tweens.add({ targets: sn, y: H + 10, x: sn.x + Phaser.Math.Between(-30, 30),
+                    duration: Phaser.Math.Between(3000, 5000), onComplete: () => sn.destroy() });
+            }
+        });
+
+        // Player
+        this.player = createFairy(this, 120, H - 100, 0x88ff88, 0xaaffaa, false);
+        this.player.setDepth(100);
+        this.physics.add.existing(this.player);
+        this.player.body.setSize(20, 24).setCollideWorldBounds(true);
+
+        // Boss
+        this.boss = createFairy(this, 620, 250, 0xff4422, 0xff8844, false);
+        this.boss.setDepth(90);
+        this.physics.add.existing(this.boss);
+        this.boss.body.setSize(24, 28).setCollideWorldBounds(true);
+        this.bDir = { x: 1.5, y: 1 };
+        this.bTimer = 0;
+
+        // Projectile groups
+        this.pBullets = this.physics.add.group();
+        this.bBullets = this.physics.add.group();
+
+        // HUD
+        this.add.rectangle(W / 2, 16, W, 32, 0x000000, 0.5).setDepth(900);
+        this.hpT = this.add.text(10, 6, '', { fontSize: '14px', color: '#88ff88', fontStyle: 'bold' }).setDepth(1000);
+        this.bhpT = this.add.text(W - 10, 6, '', { fontSize: '14px', color: '#ff8844', fontStyle: 'bold' }).setOrigin(1, 0).setDepth(1000);
+        this.refreshHUD();
+
+        // Collisions
+        this.physics.add.overlap(this.pBullets, this.boss, (boss, b) => {
+            b.destroy();
+            this.bossHP--;
+            sparkles(this, boss.x, boss.y, 8, 0xff4400);
+            this.tweens.add({ targets: boss, alpha: 0.3, duration: 80, yoyo: true, repeat: 2 });
+            this.refreshHUD();
+            if (this.bossHP <= 0) this.bossDefeated();
+        });
+        this.physics.add.overlap(this.bBullets, this.player, (player, b) => {
+            b.destroy();
+            this.playerHP--;
+            sparkles(this, player.x, player.y, 6, 0xff0000);
+            this.tweens.add({ targets: player, alpha: 0.3, duration: 80, yoyo: true, repeat: 2 });
+            this.cameras.main.shake(200, 0.008);
+            this.refreshHUD();
+            if (this.playerHP <= 0) {
+                this.phase = 'dead';
+                showDialog(this, ['Oh no! You were defeated!', "Don't worry, let's try again!"], () => this.scene.restart());
+            }
+        });
+
+        // Shoot on click
+        this.input.on('pointerdown', (p) => {
+            if (this._dialogActive || this.phase !== 'fight') return;
+            this.shoot(p);
+        });
+
+        // Intro dialog
+        this.time.delayedCall(500, () => {
+            showDialog(this, [
+                { speaker: 'Fairy', text: 'I teleported behind the Ice Fairy Castle!' },
+                { speaker: '🔥 Fire Fairy', text: 'You stole our powers! I will stop you!' },
+                { speaker: 'Fairy', text: "I'll fight her with fireballs!" },
+                TOUCH.active ? 'Use the D-pad to move and the fire button to shoot!' : 'Click to shoot fireballs at the Fire Fairy! Dodge her attacks!'
+            ], () => { this.phase = 'fight'; });
+        });
+    }
+
+    refreshHUD() {
+        this.hpT.setText('You: ' + '❤️'.repeat(Math.max(0, this.playerHP)) + '🖤'.repeat(Math.max(0, 5 - this.playerHP)));
+        this.bhpT.setText('Boss: ' + '🔥'.repeat(Math.max(0, this.bossHP)) + '⬛'.repeat(Math.max(0, this.bossMaxHP - this.bossHP)));
+    }
+
+    shoot(ptr) {
+        if (this.cooldown > 0) return;
+        this.cooldown = 15;
+        const b = this.add.circle(this.player.x, this.player.y, 6, 0xff6600).setDepth(95);
+        this.pBullets.add(b);
+        this.physics.add.existing(b);
+        const a = Phaser.Math.Angle.Between(this.player.x, this.player.y, ptr.x, ptr.y);
+        b.body.setVelocity(Math.cos(a) * 350, Math.sin(a) * 350);
+        // Trail
+        const t = this.add.circle(this.player.x, this.player.y, 4, 0xff4400, 0.4).setDepth(94);
+        this.tweens.add({ targets: t, alpha: 0, scaleX: 2, scaleY: 2, duration: 250, onComplete: () => t.destroy() });
+        this.time.delayedCall(2500, () => { if (b.active) b.destroy(); });
+    }
+
+    bossShoot() {
+        if (!this.boss || !this.boss.active) return;
+        const b = this.add.circle(this.boss.x, this.boss.y, 5, 0xff2200).setDepth(95);
+        this.bBullets.add(b);
+        this.physics.add.existing(b);
+        const a = Phaser.Math.Angle.Between(this.boss.x, this.boss.y, this.player.x, this.player.y);
+        b.body.setVelocity(Math.cos(a) * 180, Math.sin(a) * 180);
+        this.time.delayedCall(3000, () => { if (b.active) b.destroy(); });
+    }
+
+    bossDefeated() {
+        this.phase = 'postBoss';
+        this.player.body.setVelocity(0);
+        sparkles(this, this.boss.x, this.boss.y, 30, 0xff8800);
+        this.tweens.add({
+            targets: this.boss, alpha: 0, scaleX: 2, scaleY: 2, duration: 800,
+            onComplete: () => {
+                this.boss.destroy();
+                sparkles(this, 550, 300, 15, 0xffd700);
+                showDialog(this, [
+                    { speaker: 'Fairy', text: 'I defeated the Fire Fairy! She dropped a necklace!' },
+                    '📿 Magical Necklace acquired! You can transform into any animal!',
+                    { speaker: 'Fairy', text: "I'll become a tiny mouse to sneak under the castle door!" }
+                ], () => this.iceChest());
+            }
+        });
+    }
+
+    iceChest() {
+        sparkles(this, this.player.x, this.player.y, 20, 0xffdd00);
+        showDialog(this, [
+            '✨ You transform into a tiny mouse and sneak under the door!',
+            { speaker: 'Fairy', text: "There's a chest in here! And the key is right next to it!" }
+        ], () => {
+            sparkles(this, W / 2, H / 2, 30, 0x44ccff);
+            STATE.powers.push('Ice Sword', 'Ice Ball', 'Snowball', 'Icy Arrow', 'Freeze Sword');
+            showDialog(this, [
+                '❄️ Ice Sword acquired!',
+                '🧊 Ice Ball acquired!',
+                '⛄ Snowball acquired!',
+                '🏹 Icy Arrow acquired!',
+                '🗡️ Special Freeze Sword acquired! Save this for Chapter 15!',
+                { speaker: 'Fairy', text: 'The Fire and Ice Fairies are fighting each other! Time for the tower!' }
+            ], () => this.chapterDone());
+        });
+    }
+
+    chapterDone() {
+        const ov = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(3000);
+        this.tweens.add({
+            targets: ov, alpha: 0.85, duration: 800,
+            onComplete: () => {
+                this.add.text(W / 2, 190, 'Chapter 2 Complete!', {
+                    fontSize: '36px', fontFamily: 'Georgia', color: '#44ccff', fontStyle: 'bold'
+                }).setOrigin(0.5).setDepth(3001);
+                this.add.text(W / 2, 250, '📿 Necklace  ❄️ Ice Sword  🧊 Ice Ball  ⛄ Snowball', {
+                    fontSize: '13px', color: '#66ddff'
+                }).setOrigin(0.5).setDepth(3001);
+                this.add.text(W / 2, 275, '🏹 Icy Arrow  🗡️ Freeze Sword', {
+                    fontSize: '13px', color: '#66ddff'
+                }).setOrigin(0.5).setDepth(3001);
+                const btn = this.add.rectangle(W / 2, 380, 200, 50, 0x4488cc)
+                    .setStrokeStyle(2, 0x66aaee).setDepth(3001).setInteractive({ useHandCursor: true });
+                this.add.text(W / 2, 380, 'Continue →', { fontSize: '22px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(3002);
+                btn.on('pointerdown', () => {
+                    this.cameras.main.fadeOut(500);
+                    this.time.delayedCall(500, () => this.scene.start('Chapter3Scene'));
+                });
+            }
+        });
+    }
+
+    update() {
+        if (!this.player || !this.player.body) return;
+        if (this.cooldown > 0) this.cooldown--;
+        if (this._dialogBlocked || this.phase !== 'fight') { if (this.player.body) this.player.body.setVelocity(0); return; }
+
+        let vx = 0, vy = 0;
+        if (this.cursors.left.isDown || this.wasd.left.isDown || TOUCH.left) vx = -FAIRY_SPEED;
+        if (this.cursors.right.isDown || this.wasd.right.isDown || TOUCH.right) vx = FAIRY_SPEED;
+        if (this.cursors.up.isDown || this.wasd.up.isDown || TOUCH.up) vy = -FAIRY_SPEED;
+        if (this.cursors.down.isDown || this.wasd.down.isDown || TOUCH.down) vy = FAIRY_SPEED;
+        this.player.body.setVelocity(vx, vy);
+        if (vx < 0) this.player.setAngle(-8);
+        else if (vx > 0) this.player.setAngle(8);
+        else this.player.setAngle(0);
+
+        // Touch fire button — auto-aim at boss
+        if (TOUCH.fire && this.boss && this.boss.active && this.bossHP > 0) {
+            this.shoot({ x: this.boss.x, y: this.boss.y });
+            TOUCH.fire = false;
+        }
+
+        // Trail
+        if ((vx || vy) && Phaser.Math.Between(0, 5) === 0) {
+            const sp = this.add.circle(this.player.x, this.player.y + 10, 2, 0x88ff88, 0.3).setDepth(99);
+            this.tweens.add({ targets: sp, alpha: 0, scaleX: 0, scaleY: 0, duration: 400, onComplete: () => sp.destroy() });
+        }
+
+        // Boss AI
+        if (this.boss && this.boss.active && this.bossHP > 0) {
+            this.boss.x += this.bDir.x;
+            this.boss.y += this.bDir.y;
+            if (this.boss.x > W - 40 || this.boss.x < 200) this.bDir.x *= -1;
+            if (this.boss.y > H - 60 || this.boss.y < 60) this.bDir.y *= -1;
+            this.bTimer++;
+            if (this.bTimer > 80) { this.bTimer = 0; this.bossShoot(); }
+        }
+    }
+}
+
+// ==========================================
+// CHAPTER 3: THE WITCH'S TOWER
+// ==========================================
+class Chapter3Scene extends Phaser.Scene {
+    constructor() { super('Chapter3Scene'); }
+
+    create() {
+        this.cameras.main.fadeIn(500);
+        this._dialogActive = false;
+        this._dialogBlocked = false;
+        this.phase = 'intro';
+        this.frozen = 0;
+        this.needed = 3;
+        this.playerHP = 5;
+        this.cooldown = 0;
+        this.fireReady = false;
+
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd = this.input.keyboard.addKeys({ up: 'W', down: 'S', left: 'A', right: 'D' });
+
+        const fl = this.add.rectangle(W / 2, H / 2, W, H, 0x8844ff, 1).setDepth(4000);
+        this.tweens.add({ targets: fl, alpha: 0, duration: 600, onComplete: () => fl.destroy() });
+
+        const chT = this.add.text(W / 2, H / 2, "Chapter 3\nThe Witch's Tower", {
+            fontSize: '32px', fontFamily: 'Georgia', color: '#bb66ff',
+            fontStyle: 'bold', align: 'center', lineSpacing: 10
+        }).setOrigin(0.5).setAlpha(0).setDepth(3000);
+        this.tweens.add({ targets: chT, alpha: 1, duration: 800, yoyo: true, hold: 1500,
+            onComplete: () => { chT.destroy(); this.startTower(); } });
+    }
+
+    startTower() {
+        // Background
+        const bg = this.add.graphics();
+        bg.fillGradientStyle(0x150825, 0x150825, 0x1a0a35, 0x1a0a35);
+        bg.fillRect(0, 0, W, H);
+
+        // Stars
+        for (let i = 0; i < 60; i++) {
+            const st = this.add.circle(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H * 0.6),
+                Phaser.Math.Between(1, 2), 0xffffff, Phaser.Math.FloatBetween(0.3, 0.8));
+            this.tweens.add({ targets: st, alpha: 0.1, duration: Phaser.Math.Between(1000, 3000), yoyo: true, repeat: -1 });
+        }
+
+        // Floor & walls
+        this.add.rectangle(W / 2, H - 40, W, 80, 0x443355);
+        this.add.rectangle(W / 2, H - 78, W, 3, 0x554466);
+        this.add.rectangle(5, H / 2, 10, H, 0x332244);
+        this.add.rectangle(W - 5, H / 2, 10, H, 0x332244);
+
+        // Witch
+        this.witch = this.add.container(650, H - 120);
+        this.witch.add(this.add.ellipse(0, 10, 24, 30, 0x4a0a6a));
+        this.witch.add(this.add.circle(0, -8, 10, 0x88cc88));
+        this.witch.add(this.add.triangle(0, -30, -15, 15, 0, -15, 15, 15, 0x220044));
+        this.witch.add(this.add.rectangle(0, -17, 35, 5, 0x220044));
+        this.witch.add(this.add.circle(-4, -10, 2, 0xff0000));
+        this.witch.add(this.add.circle(4, -10, 2, 0xff0000));
+        this.witch.add(this.add.rectangle(20, 0, 4, 50, 0x8B4513));
+        this.witch.add(this.add.circle(20, -24, 6, 0xaa44ff));
+        this.witch.setDepth(80);
+        this.tweens.add({ targets: this.witch, y: this.witch.y - 5, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+        // Player
+        this.player = createFairy(this, 150, H - 110, 0x88ff88, 0xaaffaa, false);
+        this.player.setDepth(100);
+        this.physics.add.existing(this.player);
+        this.player.body.setSize(20, 24).setCollideWorldBounds(true);
+
+        // Projectile groups
+        this.iceBalls = this.physics.add.group();
+        this.brooms = this.physics.add.group();
+
+        // HUD
+        this.add.rectangle(W / 2, 16, W, 32, 0x000000, 0.5).setDepth(900);
+        this.hpText = this.add.text(10, 6, '', { fontSize: '14px', color: '#88ffff', fontStyle: 'bold' }).setDepth(1000);
+        this.broomText = this.add.text(W - 10, 6, '', { fontSize: '14px', color: '#bb88ff', fontStyle: 'bold' }).setOrigin(1, 0).setDepth(1000);
+        this.refreshHUD();
+
+        // Collisions
+        this.physics.add.overlap(this.iceBalls, this.brooms, (ball, broom) => { this.freezeBroom(ball, broom); });
+        this.physics.add.overlap(this.brooms, this.player, (player, broom) => { this.broomHit(broom); });
+
+        // Shoot
+        this.input.on('pointerdown', (p) => {
+            if (this._dialogActive || (this.phase !== 'fight' && this.phase !== 'findFire')) return;
+            this.shootIce(p);
+        });
+
+        // Intro
+        this.time.delayedCall(500, () => {
+            showDialog(this, [
+                { speaker: 'Fairy', text: "I'm at the top of the tower!" },
+                { speaker: '🧙 Witch', text: 'Hehehe! No one enters MY tower! Take this!' },
+                { speaker: 'Fairy', text: "She's sending brooms! I'll freeze them with ice!" },
+                TOUCH.active ? 'Use the D-pad to dodge and fire button to freeze brooms!' : 'Click to shoot ice balls! Freeze 3 brooms!'
+            ], () => { this.phase = 'fight'; this.launchBroom(); });
+        });
+    }
+
+    refreshHUD() {
+        this.hpText.setText('You: ' + '❤️'.repeat(Math.max(0, this.playerHP)) + '🖤'.repeat(Math.max(0, 5 - this.playerHP)));
+        this.broomText.setText('Brooms: ' + this.frozen + '/' + this.needed);
+    }
+
+    shootIce(ptr) {
+        if (this.cooldown > 0) return;
+        this.cooldown = 12;
+        const b = this.add.circle(this.player.x, this.player.y, 5, 0x44ccff).setDepth(95);
+        this.iceBalls.add(b);
+        this.physics.add.existing(b);
+        const a = Phaser.Math.Angle.Between(this.player.x, this.player.y, ptr.x, ptr.y);
+        b.body.setVelocity(Math.cos(a) * 400, Math.sin(a) * 400);
+        const t = this.add.circle(this.player.x, this.player.y, 3, 0x88eeff, 0.4).setDepth(94);
+        this.tweens.add({ targets: t, alpha: 0, scaleX: 2, scaleY: 2, duration: 250, onComplete: () => t.destroy() });
+        this.time.delayedCall(2500, () => { if (b.active) b.destroy(); });
+    }
+
+    launchBroom() {
+        if (this.frozen >= this.needed || this.phase !== 'fight') return;
+        const broom = this.add.container(this.witch.x - 20, this.witch.y);
+        broom.add(this.add.rectangle(0, 0, 40, 6, 0x8B4513));
+        broom.add(this.add.triangle(-22, 0, -10, -8, 0, 0, -10, 8, 0xDAA520));
+        broom.setDepth(85);
+        this.brooms.add(broom);
+        this.physics.add.existing(broom);
+        broom.body.setSize(40, 16);
+        const a = Phaser.Math.Angle.Between(broom.x, broom.y, this.player.x + Phaser.Math.Between(-40, 40), this.player.y + Phaser.Math.Between(-20, 20));
+        broom.body.setVelocity(Math.cos(a) * 140, Math.sin(a) * 140);
+        broom.angle = Phaser.Math.RadToDeg(a);
+        this.time.delayedCall(4000, () => { if (broom.active) broom.destroy(); });
+        // Next broom
+        this.time.delayedCall(2200, () => this.launchBroom());
+    }
+
+    freezeBroom(ball, broom) {
+        ball.destroy();
+        this.frozen++;
+        sparkles(this, broom.x, broom.y, 12, 0x88eeff);
+        if (broom.body) broom.body.setVelocity(0);
+        if (broom.list) broom.list.forEach(c => { if (c.setFillStyle) c.setFillStyle(0x88ccff); });
+        this.tweens.add({ targets: broom, alpha: 0, duration: 800, delay: 200, onComplete: () => broom.destroy() });
+        this.refreshHUD();
+        if (this.frozen >= this.needed) {
+            this.phase = 'sunGod';
+            this.time.delayedCall(1000, () => this.sunGod());
+        }
+    }
+
+    broomHit(broom) {
+        broom.destroy();
+        this.playerHP--;
+        sparkles(this, this.player.x, this.player.y, 6, 0xff4444);
+        this.cameras.main.shake(200, 0.008);
+        this.refreshHUD();
+        if (this.playerHP <= 0) {
+            this.phase = 'dead';
+            showDialog(this, ['The brooms got you!', "Let's try again!"], () => this.scene.restart());
+        }
+    }
+
+    sunGod() {
+        this.player.body.setVelocity(0);
+        const ov = this.add.rectangle(W / 2, H / 2, W, H, 0xffaa00, 0).setDepth(1500);
+        this.tweens.add({ targets: ov, alpha: 0.25, duration: 1000 });
+
+        const sun = this.add.circle(W / 2, 150, 50, 0xffdd00).setDepth(1501).setAlpha(0);
+        const rays = this.add.circle(W / 2, 150, 65, 0xffee44, 0.3).setDepth(1500).setAlpha(0);
+        this.tweens.add({ targets: [sun, rays], alpha: 1, duration: 800 });
+        this.tweens.add({ targets: rays, scaleX: 1.2, scaleY: 1.2, duration: 1000, yoyo: true, repeat: -1 });
+
+        const e1 = this.add.circle(W / 2 - 15, 140, 5, 0xff8800).setDepth(1502).setAlpha(0);
+        const e2 = this.add.circle(W / 2 + 15, 140, 5, 0xff8800).setDepth(1502).setAlpha(0);
+        this.tweens.add({ targets: [e1, e2], alpha: 1, duration: 800 });
+
+        this.time.delayedCall(1200, () => {
+            showDialog(this, [
+                { speaker: '☀️ Sun God', text: 'Brave fairy! The witch will send more brooms soon.' },
+                { speaker: '☀️ Sun God', text: 'Step on the fire to defeat her! There is no other way!' },
+                { speaker: '☀️ Sun God', text: 'Hurry, before she regains her power!' }
+            ], () => {
+                this.tweens.add({
+                    targets: [ov, sun, rays, e1, e2], alpha: 0, duration: 800,
+                    onComplete: () => { ov.destroy(); sun.destroy(); rays.destroy(); e1.destroy(); e2.destroy(); this.showFire(); }
+                });
+            });
+        });
+    }
+
+    showFire() {
+        this.phase = 'findFire';
+        this.fire = this.add.container(W / 2, H - 65);
+        const f1 = this.add.ellipse(0, -5, 20, 30, 0xff4400, 0.8);
+        const f2 = this.add.ellipse(-5, 0, 14, 22, 0xffaa00, 0.7);
+        const f3 = this.add.ellipse(5, -2, 12, 20, 0xff6600, 0.7);
+        this.fire.add(f1); this.fire.add(f2); this.fire.add(f3);
+        this.fire.setDepth(95);
+        this.tweens.add({ targets: f1, scaleY: 1.3, scaleX: 0.8, duration: 200, yoyo: true, repeat: -1 });
+        this.tweens.add({ targets: f2, scaleY: 1.2, scaleX: 1.3, duration: 300, yoyo: true, repeat: -1 });
+
+        // Label
+        const lbl = this.add.text(W / 2, H - 105, '🔥 Step on the fire!', { fontSize: '13px', color: '#ffaa44' }).setOrigin(0.5).setDepth(96);
+        this.tweens.add({ targets: lbl, alpha: 0.4, duration: 500, yoyo: true, repeat: -1 });
+
+        this.fireZone = this.add.zone(W / 2, H - 65, 40, 40).setDepth(96);
+        this.physics.add.existing(this.fireZone, true);
+        this.physics.add.overlap(this.player, this.fireZone, () => {
+            if (this.fireReady) return;
+            this.fireReady = true;
+            this.defeatWitch();
+        });
+
+        showDialog(this, ['A magical fire appeared! Walk into it to defeat the witch!']);
+    }
+
+    defeatWitch() {
+        this.phase = 'witchDead';
+        this.player.body.setVelocity(0);
+        sparkles(this, this.fire.x, this.fire.y, 25, 0xff4400);
+        this.tweens.add({
+            targets: this.witch, alpha: 0, scaleX: 1.5, scaleY: 1.5, angle: 360, duration: 1000,
+            onComplete: () => {
+                sparkles(this, this.witch.x, this.witch.y, 25, 0xaa44ff);
+                this.witch.destroy();
+                this.fire.destroy();
+                this.hatScene();
+            }
+        });
+    }
+
+    hatScene() {
+        const hat = this.add.container(600, H - 130);
+        hat.add(this.add.triangle(0, 0, -15, 15, 0, -15, 15, 15, 0x440088));
+        hat.add(this.add.rectangle(0, 13, 35, 5, 0x440088));
+        hat.add(this.add.circle(-5, 5, 2, 0xffdd00));
+        hat.add(this.add.circle(5, 5, 2, 0xffdd00));
+        hat.setDepth(110);
+        this.tweens.add({ targets: hat, y: hat.y - 8, duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+        showDialog(this, [
+            { speaker: '🎩 Hat', text: 'I can talk! The witch cursed me long ago...' },
+            { speaker: '🎩 Hat', text: 'The Sun and Moon gods weakened her, but I was still trapped!' },
+            { speaker: '🎩 Hat', text: "Wear me and I'll give you MAGICAL POWERS!" },
+            { speaker: '🎩 Hat', text: "You'll need them in Chapter 15... trust me!" },
+            { speaker: 'Fairy', text: "Of course! Let's do this!" },
+        ], () => {
+            this.tweens.add({
+                targets: hat, x: this.player.x, y: this.player.y - 25, duration: 500,
+                onComplete: () => {
+                    sparkles(this, this.player.x, this.player.y, 25, 0xaa44ff);
+                    hat.setScale(0.6);
+                    STATE.powers.push('Witch Hat', 'Staff Powers', 'Super Speed', 'Freezing', 'Lava Power', 'Super Jump');
+                    showDialog(this, [
+                        '🎩 Witch Hat acquired!',
+                        '🪄 Staff Powers: Immobilize & Silence!',
+                        '⚡ Super Speed acquired!',
+                        '🧊 Freezing, 🌋 Lava, and 🦘 Super Jump acquired!',
+                        { speaker: '🎩 Hat', text: 'Remember: save the strongest powers for Chapter 15!' },
+                        { speaker: 'Fairy', text: "I found the wizard's staff too! What an adventure!" }
+                    ], () => this.chapterDone());
+                }
+            });
+        });
+    }
+
+    chapterDone() {
+        const ov = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(3000);
+        this.tweens.add({
+            targets: ov, alpha: 0.85, duration: 800,
+            onComplete: () => {
+                this.add.text(W / 2, 180, 'Chapter 3 Complete!', {
+                    fontSize: '36px', fontFamily: 'Georgia', color: '#bb66ff', fontStyle: 'bold'
+                }).setOrigin(0.5).setDepth(3001);
+                this.add.text(W / 2, 240, '🎩 Hat  🪄 Staff  ⚡ Speed  🧊 Freeze  🌋 Lava  🦘 Jump', {
+                    fontSize: '13px', color: '#cc88ff'
+                }).setOrigin(0.5).setDepth(3001);
+                const btn = this.add.rectangle(W / 2, 380, 200, 50, 0x8844aa)
+                    .setStrokeStyle(2, 0xaa66cc).setDepth(3001).setInteractive({ useHandCursor: true });
+                this.add.text(W / 2, 380, 'Finish →', { fontSize: '22px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(3002);
+                btn.on('pointerdown', () => {
+                    this.cameras.main.fadeOut(500);
+                    this.time.delayedCall(500, () => this.scene.start('EndScene'));
+                });
+            }
+        });
+    }
+
+    update() {
+        if (!this.player || !this.player.body) return;
+        if (this.cooldown > 0) this.cooldown--;
+        if (this._dialogBlocked || (this.phase !== 'fight' && this.phase !== 'findFire')) {
+            if (this.player.body) this.player.body.setVelocity(0);
+            return;
+        }
+        let vx = 0, vy = 0;
+        if (this.cursors.left.isDown || this.wasd.left.isDown || TOUCH.left) vx = -FAIRY_SPEED;
+        if (this.cursors.right.isDown || this.wasd.right.isDown || TOUCH.right) vx = FAIRY_SPEED;
+        if (this.cursors.up.isDown || this.wasd.up.isDown || TOUCH.up) vy = -FAIRY_SPEED;
+        if (this.cursors.down.isDown || this.wasd.down.isDown || TOUCH.down) vy = FAIRY_SPEED;
+        this.player.body.setVelocity(vx, vy);
+        if (vx < 0) this.player.setAngle(-8);
+        else if (vx > 0) this.player.setAngle(8);
+        else this.player.setAngle(0);
+
+        // Touch fire button — auto-aim at nearest broom
+        if (TOUCH.fire && this.phase === 'fight') {
+            let nearest = null, minDist = Infinity;
+            this.brooms.getChildren().forEach(b => {
+                if (!b.active) return;
+                const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, b.x, b.y);
+                if (d < minDist) { minDist = d; nearest = b; }
+            });
+            if (nearest) this.shootIce({ x: nearest.x, y: nearest.y });
+            else this.shootIce({ x: this.witch ? this.witch.x : W / 2, y: this.witch ? this.witch.y : H / 2 });
+            TOUCH.fire = false;
+        }
+    }
+}
+
+// ==========================================
+// END SCENE
+// ==========================================
+class EndScene extends Phaser.Scene {
+    constructor() { super('EndScene'); }
+    create() {
+        this.cameras.main.fadeIn(800);
+        const bg = this.add.graphics();
+        bg.fillGradientStyle(0x1a0a3e, 0x0a2060, 0x1a0a3e, 0x0a2060);
+        bg.fillRect(0, 0, W, H);
+
+        for (let i = 0; i < 100; i++) {
+            const st = this.add.circle(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H),
+                Phaser.Math.Between(1, 3), 0xffffff, Phaser.Math.FloatBetween(0.2, 0.9));
+            this.tweens.add({ targets: st, alpha: 0.1, duration: Phaser.Math.Between(800, 2500), yoyo: true, repeat: -1 });
+        }
+
+        this.time.addEvent({
+            delay: 200, loop: true, callback: () => {
+                const sx = Phaser.Math.Between(50, W - 50), sy = Phaser.Math.Between(50, H - 50);
+                const s = this.add.circle(sx, sy, 2,
+                    Phaser.Math.RND.pick([0xffd700, 0xff44aa, 0x44ccff, 0x88ff88]), 0.8);
+                this.tweens.add({ targets: s, alpha: 0, scaleX: 0, scaleY: 0, y: sy - 20, duration: 800, onComplete: () => s.destroy() });
+            }
+        });
+
+        const fairy = createFairy(this, W / 2, 310);
+        fairy.setDepth(10);
+        this.tweens.add({ targets: fairy, y: 300, duration: 600, yoyo: true, repeat: -1, ease: 'Bounce.easeOut' });
+
+        this.add.text(W / 2, 70, 'Congratulations!', {
+            fontSize: '42px', fontFamily: 'Georgia', color: '#ffd700',
+            fontStyle: 'bold', stroke: '#8B6914', strokeThickness: 3
+        }).setOrigin(0.5);
+
+        this.add.text(W / 2, 120, 'You completed Chapters 1-3!', { fontSize: '20px', color: '#ddbbff' }).setOrigin(0.5);
+
+        this.add.text(W / 2, 190, 'To Be Continued...', {
+            fontSize: '28px', fontFamily: 'Georgia', color: '#ff88cc', fontStyle: 'italic'
+        }).setOrigin(0.5);
+        this.add.text(W / 2, 230, 'Chapters 4-15 Coming Soon!', { fontSize: '16px', color: '#88aadd' }).setOrigin(0.5);
+
+        this.add.text(W / 2, 390, 'Your Powers:', { fontSize: '14px', color: '#aaa' }).setOrigin(0.5);
+        this.add.text(W / 2, 415, '🌀 🏹 ⚔️ 🔥 📿 ❄️ 🧊 ⛄ 🗡️ 🎩 🪄 ⚡ 🌋 🦘', { fontSize: '18px' }).setOrigin(0.5);
+
+        this.add.text(W / 2, 470, 'Game Designed by Ozan', {
+            fontSize: '22px', fontFamily: 'Georgia', color: '#ffdd88', fontStyle: 'bold'
+        }).setOrigin(0.5);
+        this.add.text(W / 2, 505, 'Built with love by Uncle Berkin', { fontSize: '16px', color: '#8888aa' }).setOrigin(0.5);
+        this.add.text(W / 2, 535, 'Happy Birthday Ozzie!', { fontSize: '18px', color: '#ff88aa' }).setOrigin(0.5);
+
+        const btn = this.add.rectangle(W / 2, H - 30, 160, 35, 0x44aa44, 0.8)
+            .setStrokeStyle(2, 0x66cc66).setInteractive({ useHandCursor: true });
+        this.add.text(W / 2, H - 30, 'Play Again', { fontSize: '16px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
+        btn.on('pointerdown', () => {
+            STATE.powers = [];
+            STATE.health = 5;
+            this.cameras.main.fadeOut(500);
+            this.time.delayedCall(500, () => this.scene.start('TitleScene'));
+        });
+    }
+}
+
+// ==========================================
+// GAME CONFIG
+// ==========================================
+const config = {
+    type: Phaser.AUTO,
+    width: W,
+    height: H,
+    backgroundColor: '#0a0015',
+    physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scene: [TitleScene, Chapter1Scene, Chapter2Scene, Chapter3Scene, EndScene]
+};
+
+const game = new Phaser.Game(config);
+
+</script>
+</body>
+</html>
