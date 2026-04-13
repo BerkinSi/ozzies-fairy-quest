@@ -36,23 +36,34 @@
             user-select: none;
             -webkit-user-select: none;
         }
-        #mobile-controls.visible { display: flex; justify-content: space-between; align-items: flex-end; padding: 8px 16px; }
-        .dpad { pointer-events: auto; display: grid; grid-template-columns: 50px 50px 50px; grid-template-rows: 50px 50px; gap: 3px; }
-        .dpad-btn {
-            width: 50px; height: 50px; border: none; border-radius: 10px;
-            background: rgba(255,255,255,0.22); color: #fff; font-size: 20px;
-            display: flex; align-items: center; justify-content: center;
-            touch-action: none; -webkit-tap-highlight-color: transparent;
+        #mobile-controls.visible { display: flex; justify-content: space-between; align-items: center; padding: 8px 20px; }
+        /* Virtual Joystick */
+        #joystick-zone {
             pointer-events: auto;
+            width: 120px; height: 120px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.1);
+            border: 2px solid rgba(255,255,255,0.2);
+            position: relative;
+            touch-action: none;
         }
-        .dpad-btn:active, .dpad-btn.pressed { background: rgba(255,255,255,0.5); }
-        .dpad-btn.empty { background: transparent; pointer-events: none; }
+        #joystick-knob {
+            width: 50px; height: 50px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.4);
+            border: 2px solid rgba(255,255,255,0.6);
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            transition: background 0.1s;
+        }
+        #joystick-zone.active #joystick-knob { background: rgba(255,255,255,0.65); }
         #btn-fire {
             pointer-events: auto; width: 70px; height: 70px; border: none; border-radius: 50%;
             background: rgba(255,100,50,0.4); color: #fff; font-size: 26px;
             display: flex; align-items: center; justify-content: center;
             touch-action: none; -webkit-tap-highlight-color: transparent;
-            margin-bottom: 8px;
         }
         #btn-fire:active, #btn-fire.pressed { background: rgba(255,100,50,0.7); }
     </style>
@@ -60,17 +71,7 @@
 <body>
 <div id="game-container"></div>
 <div id="mobile-controls">
-    <div class="dpad">
-        <div class="dpad-btn empty"></div>
-        <button class="dpad-btn" id="btn-up">▲</button>
-        <div class="dpad-btn empty"></div>
-        <button class="dpad-btn" id="btn-left">◄</button>
-        <div class="dpad-btn empty"></div>
-        <button class="dpad-btn" id="btn-right">►</button>
-        <div class="dpad-btn empty"></div>
-        <button class="dpad-btn" id="btn-down">▼</button>
-        <div class="dpad-btn empty"></div>
-    </div>
+    <div id="joystick-zone"><div id="joystick-knob"></div></div>
     <button id="btn-fire">🔥</button>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
@@ -82,7 +83,7 @@ const FAIRY_SPEED = 160;
 // ==========================================
 // MOBILE TOUCH CONTROLS
 // ==========================================
-const TOUCH = { up: false, down: false, left: false, right: false, fire: false, active: false };
+const TOUCH = { up: false, down: false, left: false, right: false, fire: false, active: false, joyX: 0, joyY: 0 };
 
 (function setupMobile() {
     const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
@@ -90,19 +91,69 @@ const TOUCH = { up: false, down: false, left: false, right: false, fire: false, 
         TOUCH.active = true;
         document.getElementById('mobile-controls').classList.add('visible');
     }
-    const dirs = { 'btn-up': 'up', 'btn-down': 'down', 'btn-left': 'left', 'btn-right': 'right' };
-    Object.keys(dirs).forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const dir = dirs[id];
-        el.addEventListener('touchstart', (e) => { e.preventDefault(); TOUCH[dir] = true; el.classList.add('pressed'); }, { passive: false });
-        el.addEventListener('touchend', (e) => { e.preventDefault(); TOUCH[dir] = false; el.classList.remove('pressed'); }, { passive: false });
-        el.addEventListener('touchcancel', () => { TOUCH[dir] = false; el.classList.remove('pressed'); });
-        // Also support mouse for testing
-        el.addEventListener('mousedown', (e) => { e.preventDefault(); TOUCH[dir] = true; el.classList.add('pressed'); });
-        el.addEventListener('mouseup', () => { TOUCH[dir] = false; el.classList.remove('pressed'); });
-        el.addEventListener('mouseleave', () => { TOUCH[dir] = false; el.classList.remove('pressed'); });
-    });
+
+    // Virtual Joystick
+    const zone = document.getElementById('joystick-zone');
+    const knob = document.getElementById('joystick-knob');
+    if (zone && knob) {
+        const maxDist = 35; // max knob travel in px
+        let tracking = false;
+        let centerX = 0, centerY = 0;
+
+        function getCenter() {
+            const rect = zone.getBoundingClientRect();
+            centerX = rect.left + rect.width / 2;
+            centerY = rect.top + rect.height / 2;
+        }
+
+        function updateJoystick(clientX, clientY) {
+            let dx = clientX - centerX;
+            let dy = clientY - centerY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > maxDist) { dx = (dx / dist) * maxDist; dy = (dy / dist) * maxDist; }
+            knob.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
+            // Normalize to -1..1
+            TOUCH.joyX = dx / maxDist;
+            TOUCH.joyY = dy / maxDist;
+            // Also set boolean flags for compatibility (threshold 0.3)
+            TOUCH.left = TOUCH.joyX < -0.3;
+            TOUCH.right = TOUCH.joyX > 0.3;
+            TOUCH.up = TOUCH.joyY < -0.3;
+            TOUCH.down = TOUCH.joyY > 0.3;
+        }
+
+        function resetJoystick() {
+            tracking = false;
+            zone.classList.remove('active');
+            knob.style.transform = 'translate(-50%, -50%)';
+            TOUCH.joyX = 0; TOUCH.joyY = 0;
+            TOUCH.left = false; TOUCH.right = false; TOUCH.up = false; TOUCH.down = false;
+        }
+
+        zone.addEventListener('touchstart', (e) => {
+            e.preventDefault(); tracking = true; zone.classList.add('active');
+            getCenter();
+            updateJoystick(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+
+        zone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (tracking) updateJoystick(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+
+        zone.addEventListener('touchend', (e) => { e.preventDefault(); resetJoystick(); }, { passive: false });
+        zone.addEventListener('touchcancel', () => resetJoystick());
+
+        // Mouse support for desktop testing
+        zone.addEventListener('mousedown', (e) => {
+            e.preventDefault(); tracking = true; zone.classList.add('active');
+            getCenter(); updateJoystick(e.clientX, e.clientY);
+        });
+        document.addEventListener('mousemove', (e) => { if (tracking) updateJoystick(e.clientX, e.clientY); });
+        document.addEventListener('mouseup', () => { if (tracking) resetJoystick(); });
+    }
+
+    // Fire button
     const fireBtn = document.getElementById('btn-fire');
     if (fireBtn) {
         fireBtn.addEventListener('touchstart', (e) => { e.preventDefault(); TOUCH.fire = true; fireBtn.classList.add('pressed'); }, { passive: false });
@@ -544,10 +595,14 @@ class Chapter1Scene extends Phaser.Scene {
 
         if (this.phase === 'explore' || this.phase === 'hasKey' || this.phase === 'insideCastle') {
             let vx = 0, vy = 0;
-            if (this.cursors.left.isDown || this.wasd.left.isDown || TOUCH.left) vx = -FAIRY_SPEED;
-            if (this.cursors.right.isDown || this.wasd.right.isDown || TOUCH.right) vx = FAIRY_SPEED;
-            if (this.cursors.up.isDown || this.wasd.up.isDown || TOUCH.up) vy = -FAIRY_SPEED;
-            if (this.cursors.down.isDown || this.wasd.down.isDown || TOUCH.down) vy = FAIRY_SPEED;
+            if (TOUCH.active && (TOUCH.joyX !== 0 || TOUCH.joyY !== 0)) {
+                vx = TOUCH.joyX * FAIRY_SPEED; vy = TOUCH.joyY * FAIRY_SPEED;
+            } else {
+                if (this.cursors.left.isDown || this.wasd.left.isDown) vx = -FAIRY_SPEED;
+                if (this.cursors.right.isDown || this.wasd.right.isDown) vx = FAIRY_SPEED;
+                if (this.cursors.up.isDown || this.wasd.up.isDown) vy = -FAIRY_SPEED;
+                if (this.cursors.down.isDown || this.wasd.down.isDown) vy = FAIRY_SPEED;
+            }
             this.player.body.setVelocity(vx, vy);
 
             // Lean
@@ -642,10 +697,14 @@ class Chapter1Scene extends Phaser.Scene {
 
         if (this.phase === 'maze') {
             let vx = 0, vy = 0;
-            if (this.cursors.left.isDown || this.wasd.left.isDown || TOUCH.left) vx = -FAIRY_SPEED;
-            if (this.cursors.right.isDown || this.wasd.right.isDown || TOUCH.right) vx = FAIRY_SPEED;
-            if (this.cursors.up.isDown || this.wasd.up.isDown || TOUCH.up) vy = -FAIRY_SPEED;
-            if (this.cursors.down.isDown || this.wasd.down.isDown || TOUCH.down) vy = FAIRY_SPEED;
+            if (TOUCH.active && (TOUCH.joyX !== 0 || TOUCH.joyY !== 0)) {
+                vx = TOUCH.joyX * FAIRY_SPEED; vy = TOUCH.joyY * FAIRY_SPEED;
+            } else {
+                if (this.cursors.left.isDown || this.wasd.left.isDown) vx = -FAIRY_SPEED;
+                if (this.cursors.right.isDown || this.wasd.right.isDown) vx = FAIRY_SPEED;
+                if (this.cursors.up.isDown || this.wasd.up.isDown) vy = -FAIRY_SPEED;
+                if (this.cursors.down.isDown || this.wasd.down.isDown) vy = FAIRY_SPEED;
+            }
             this.player.body.setVelocity(vx, vy);
             if (vx < 0) this.player.setAngle(-8);
             else if (vx > 0) this.player.setAngle(8);
@@ -1283,10 +1342,14 @@ class Chapter2Scene extends Phaser.Scene {
         if (this._dialogBlocked || this.phase !== 'fight') { if (this.player.body) this.player.body.setVelocity(0); return; }
 
         let vx = 0, vy = 0;
-        if (this.cursors.left.isDown || this.wasd.left.isDown || TOUCH.left) vx = -FAIRY_SPEED;
-        if (this.cursors.right.isDown || this.wasd.right.isDown || TOUCH.right) vx = FAIRY_SPEED;
-        if (this.cursors.up.isDown || this.wasd.up.isDown || TOUCH.up) vy = -FAIRY_SPEED;
-        if (this.cursors.down.isDown || this.wasd.down.isDown || TOUCH.down) vy = FAIRY_SPEED;
+        if (TOUCH.active && (TOUCH.joyX !== 0 || TOUCH.joyY !== 0)) {
+            vx = TOUCH.joyX * FAIRY_SPEED; vy = TOUCH.joyY * FAIRY_SPEED;
+        } else {
+            if (this.cursors.left.isDown || this.wasd.left.isDown) vx = -FAIRY_SPEED;
+            if (this.cursors.right.isDown || this.wasd.right.isDown) vx = FAIRY_SPEED;
+            if (this.cursors.up.isDown || this.wasd.up.isDown) vy = -FAIRY_SPEED;
+            if (this.cursors.down.isDown || this.wasd.down.isDown) vy = FAIRY_SPEED;
+        }
         this.player.body.setVelocity(vx, vy);
         if (vx < 0) this.player.setAngle(-8);
         else if (vx > 0) this.player.setAngle(8);
@@ -1846,10 +1909,14 @@ class Chapter3Scene extends Phaser.Scene {
             return;
         }
         let vx = 0, vy = 0;
-        if (this.cursors.left.isDown || this.wasd.left.isDown || TOUCH.left) vx = -FAIRY_SPEED;
-        if (this.cursors.right.isDown || this.wasd.right.isDown || TOUCH.right) vx = FAIRY_SPEED;
-        if (this.cursors.up.isDown || this.wasd.up.isDown || TOUCH.up) vy = -FAIRY_SPEED;
-        if (this.cursors.down.isDown || this.wasd.down.isDown || TOUCH.down) vy = FAIRY_SPEED;
+        if (TOUCH.active && (TOUCH.joyX !== 0 || TOUCH.joyY !== 0)) {
+            vx = TOUCH.joyX * FAIRY_SPEED; vy = TOUCH.joyY * FAIRY_SPEED;
+        } else {
+            if (this.cursors.left.isDown || this.wasd.left.isDown) vx = -FAIRY_SPEED;
+            if (this.cursors.right.isDown || this.wasd.right.isDown) vx = FAIRY_SPEED;
+            if (this.cursors.up.isDown || this.wasd.up.isDown) vy = -FAIRY_SPEED;
+            if (this.cursors.down.isDown || this.wasd.down.isDown) vy = FAIRY_SPEED;
+        }
         this.player.body.setVelocity(vx, vy);
         if (vx < 0) this.player.setAngle(-8);
         else if (vx > 0) this.player.setAngle(8);
