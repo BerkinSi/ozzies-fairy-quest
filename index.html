@@ -6,16 +6,27 @@
     <title>Ozzie's Fairy Quest</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
+        html, body {
+            width: 100%;
+            height: 100%;
             background: #0a0015;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
             font-family: Arial, sans-serif;
             overflow: hidden;
         }
-        canvas {
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #game-container canvas {
             border-radius: 8px;
             box-shadow: 0 0 30px rgba(147, 51, 234, 0.4);
         }
@@ -24,34 +35,35 @@
             display: none;
             position: fixed;
             bottom: 0; left: 0; right: 0;
-            height: 160px;
+            height: 140px;
             z-index: 9999;
             pointer-events: none;
             user-select: none;
             -webkit-user-select: none;
         }
-        #mobile-controls.visible { display: flex; justify-content: space-between; align-items: flex-end; padding: 10px 20px; }
-        .dpad { pointer-events: auto; display: grid; grid-template-columns: 55px 55px 55px; grid-template-rows: 55px 55px; gap: 4px; }
+        #mobile-controls.visible { display: flex; justify-content: space-between; align-items: flex-end; padding: 8px 16px; }
+        .dpad { pointer-events: auto; display: grid; grid-template-columns: 50px 50px 50px; grid-template-rows: 50px 50px; gap: 3px; }
         .dpad-btn {
-            width: 55px; height: 55px; border: none; border-radius: 10px;
-            background: rgba(255,255,255,0.18); color: #fff; font-size: 22px;
+            width: 50px; height: 50px; border: none; border-radius: 10px;
+            background: rgba(255,255,255,0.22); color: #fff; font-size: 20px;
             display: flex; align-items: center; justify-content: center;
             touch-action: none; -webkit-tap-highlight-color: transparent;
             pointer-events: auto;
         }
-        .dpad-btn:active, .dpad-btn.pressed { background: rgba(255,255,255,0.45); }
+        .dpad-btn:active, .dpad-btn.pressed { background: rgba(255,255,255,0.5); }
         .dpad-btn.empty { background: transparent; pointer-events: none; }
         #btn-fire {
-            pointer-events: auto; width: 75px; height: 75px; border: none; border-radius: 50%;
-            background: rgba(255,100,50,0.35); color: #fff; font-size: 28px;
+            pointer-events: auto; width: 70px; height: 70px; border: none; border-radius: 50%;
+            background: rgba(255,100,50,0.4); color: #fff; font-size: 26px;
             display: flex; align-items: center; justify-content: center;
             touch-action: none; -webkit-tap-highlight-color: transparent;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
-        #btn-fire:active, #btn-fire.pressed { background: rgba(255,100,50,0.65); }
+        #btn-fire:active, #btn-fire.pressed { background: rgba(255,100,50,0.7); }
     </style>
 </head>
 <body>
+<div id="game-container"></div>
 <div id="mobile-controls">
     <div class="dpad">
         <div class="dpad-btn empty"></div>
@@ -1225,15 +1237,34 @@ class EndScene extends Phaser.Scene {
 // ==========================================
 // GAME CONFIG
 // ==========================================
+const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+const controlsHeight = isMobile ? 140 : 0;
+
 const config = {
     type: Phaser.AUTO,
+    parent: 'game-container',
     width: W,
     height: H,
     backgroundColor: '#0a0015',
     physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
-    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        max: { width: W, height: H }
+    },
     scene: [TitleScene, Chapter1Scene, Chapter2Scene, Chapter3Scene, EndScene]
 };
+
+// On mobile, shrink the container so game + controls fit without overlap
+if (isMobile) {
+    const container = document.getElementById('game-container');
+    container.style.height = (window.innerHeight - controlsHeight) + 'px';
+    container.style.alignItems = 'flex-start';
+    container.style.paddingTop = '8px';
+    window.addEventListener('resize', () => {
+        container.style.height = (window.innerHeight - controlsHeight) + 'px';
+    });
+}
 
 const game = new Phaser.Game(config);
 
