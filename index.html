@@ -125,6 +125,18 @@ const STATE = {
 // ==========================================
 // DIALOG SYSTEM
 // ==========================================
+// ==========================================
+// ILLUSTRATION / CUTSCENE MODE
+// Full-screen takeover with character portrait + text
+// ==========================================
+const PORTRAITS = {
+    'Fairy': { emoji: '🧝‍♂️', color: 0x88ff88, glow: 0x44cc44 },
+    'Fire Fairy': { emoji: '🔥', color: 0xff6622, glow: 0xff4400 },
+    'Witch': { emoji: '🧙', color: 0xbb44ff, glow: 0x8822cc },
+    'Hat': { emoji: '🎩', color: 0xffdd00, glow: 0xccaa00 },
+    'Sun God': { emoji: '☀️', color: 0xffdd00, glow: 0xffaa00 },
+};
+
 function showDialog(scene, messages, onComplete) {
     if (scene._dialogActive) return;
     scene._dialogActive = true;
@@ -132,42 +144,125 @@ function showDialog(scene, messages, onComplete) {
 
     let idx = 0;
     const D = 2000;
+    const els = []; // track all elements for cleanup
 
-    const bg = scene.add.rectangle(W / 2, H - 70, W - 40, 120, 0x000000, 0.88)
-        .setStrokeStyle(2, 0x8844cc).setDepth(D);
-    const speaker = scene.add.text(40, H - 122, '', {
-        fontSize: '16px', color: '#ffd700', fontStyle: 'bold'
-    }).setDepth(D + 1);
-    const body = scene.add.text(40, H - 98, '', {
-        fontSize: '15px', color: '#ffffff',
-        wordWrap: { width: W - 90 }, lineSpacing: 4
-    }).setDepth(D + 1);
-    const hintText = TOUCH.active ? 'tap to continue' : 'click to continue';
-    const hint = scene.add.text(W - 30, H - 22, hintText, {
-        fontSize: '11px', color: '#777'
-    }).setOrigin(1, 0.5).setDepth(D + 1);
-    scene.tweens.add({ targets: hint, alpha: 0.3, duration: 500, yoyo: true, repeat: -1 });
+    // Full-screen dark overlay
+    const overlay = scene.add.rectangle(W / 2, H / 2, W, H, 0x0a0015, 0).setDepth(D);
+    els.push(overlay);
+    scene.tweens.add({ targets: overlay, fillAlpha: 0.92, duration: 300 });
+
+    // Decorative top/bottom bars
+    const topBar = scene.add.rectangle(W / 2, 0, W, 4, 0x8844cc, 0.6).setDepth(D + 1);
+    const botBar = scene.add.rectangle(W / 2, H, W, 4, 0x8844cc, 0.6).setDepth(D + 1);
+    els.push(topBar, botBar);
+
+    // Portrait area (left side)
+    const portraitBg = scene.add.circle(130, H / 2 - 20, 65, 0x222244, 0.5).setDepth(D + 1);
+    els.push(portraitBg);
+    const portraitGlow = scene.add.circle(130, H / 2 - 20, 70, 0x8844cc, 0).setDepth(D + 1);
+    els.push(portraitGlow);
+    const portraitEmoji = scene.add.text(130, H / 2 - 20, '', { fontSize: '56px' }).setOrigin(0.5).setDepth(D + 2);
+    els.push(portraitEmoji);
+
+    // Speaker name
+    const speakerText = scene.add.text(240, H / 2 - 70, '', {
+        fontSize: '22px', color: '#ffd700', fontStyle: 'bold', fontFamily: 'Georgia'
+    }).setDepth(D + 2).setAlpha(0);
+    els.push(speakerText);
+
+    // Divider line under speaker name
+    const divider = scene.add.rectangle(460, H / 2 - 45, 400, 2, 0x8844cc, 0.4).setDepth(D + 1);
+    els.push(divider);
+
+    // Body text
+    const bodyText = scene.add.text(240, H / 2 - 30, '', {
+        fontSize: '17px', color: '#eeeeff',
+        wordWrap: { width: W - 290 }, lineSpacing: 6, fontFamily: 'Georgia'
+    }).setDepth(D + 2).setAlpha(0);
+    els.push(bodyText);
+
+    // Hint text
+    const hintStr = TOUCH.active ? 'tap to continue' : 'click to continue';
+    const hint = scene.add.text(W - 30, H - 25, hintStr, {
+        fontSize: '12px', color: '#666688'
+    }).setOrigin(1, 0.5).setDepth(D + 2);
+    els.push(hint);
+    scene.tweens.add({ targets: hint, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+
+    // Ambient particles
+    for (let i = 0; i < 12; i++) {
+        const px = Phaser.Math.Between(50, W - 50);
+        const py = Phaser.Math.Between(50, H - 50);
+        const star = scene.add.circle(px, py, Phaser.Math.Between(1, 3), 0x8866cc, 0).setDepth(D + 1);
+        els.push(star);
+        scene.tweens.add({
+            targets: star, alpha: { from: 0, to: 0.4 }, duration: Phaser.Math.Between(1000, 2000),
+            yoyo: true, repeat: -1, delay: Phaser.Math.Between(0, 1500)
+        });
+    }
 
     function show() {
         const m = messages[idx];
-        if (typeof m === 'string') { speaker.setText(''); body.setText(m); }
-        else { speaker.setText(m.speaker || ''); body.setText(m.text || ''); }
+        let spk = '', txt = '', portrait = null;
+
+        if (typeof m === 'string') {
+            spk = ''; txt = m;
+        } else {
+            spk = m.speaker || ''; txt = m.text || '';
+        }
+
+        // Find portrait - strip emoji prefix from speaker name for lookup
+        const cleanSpk = spk.replace(/^[^\w]*/, '').trim();
+        portrait = PORTRAITS[cleanSpk] || PORTRAITS[spk] || null;
+
+        // Update portrait
+        if (portrait) {
+            portraitEmoji.setText(portrait.emoji);
+            portraitBg.setFillStyle(portrait.color, 0.15);
+            portraitGlow.setFillStyle(portrait.glow, 0.12);
+            scene.tweens.add({ targets: portraitEmoji, scaleX: 1.1, scaleY: 1.1, duration: 200, yoyo: true });
+        } else {
+            portraitEmoji.setText(spk ? '💬' : '✨');
+            portraitBg.setFillStyle(0x444466, 0.3);
+            portraitGlow.setFillStyle(0x8844cc, 0.08);
+        }
+
+        // Animate text in
+        speakerText.setText(spk).setAlpha(0);
+        bodyText.setText(txt).setAlpha(0);
+        scene.tweens.add({ targets: speakerText, alpha: 1, duration: 200 });
+        scene.tweens.add({ targets: bodyText, alpha: 1, duration: 300, delay: 100 });
     }
 
     function advance() {
         if (!scene._dialogActive) return;
         idx++;
         if (idx >= messages.length) {
-            bg.destroy(); speaker.destroy(); body.destroy(); hint.destroy();
-            scene._dialogActive = false;
-            scene._dialogBlocked = false;
-            scene.input.off('pointerdown', advance);
-            if (onComplete) onComplete();
+            // Fade out overlay
+            scene.tweens.add({
+                targets: overlay, fillAlpha: 0, duration: 300,
+                onComplete: () => {
+                    els.forEach(e => { if (e && e.active) e.destroy(); });
+                    scene._dialogActive = false;
+                    scene._dialogBlocked = false;
+                    scene.input.off('pointerdown', advance);
+                    if (onComplete) onComplete();
+                }
+            });
+            // Fade out other elements immediately
+            els.forEach(e => {
+                if (e !== overlay && e && e.active) {
+                    scene.tweens.add({ targets: e, alpha: 0, duration: 200 });
+                }
+            });
         } else { show(); }
     }
 
-    show();
-    scene.input.on('pointerdown', advance);
+    // Small delay before first show so overlay fade-in is visible
+    scene.time.delayedCall(200, () => {
+        show();
+        scene.input.on('pointerdown', advance);
+    });
 }
 
 // ==========================================
@@ -215,23 +310,27 @@ function sparkles(scene, x, y, n, color) {
 // DRAW TREE
 // ==========================================
 function drawTree(scene, x, y) {
-    scene.add.rectangle(x, y + 12, 8, 22, 0x8B4513);
-    scene.add.circle(x, y - 5, 16, 0x228B22);
-    scene.add.circle(x - 4, y - 9, 6, 0x32CD32, 0.5);
+    return [
+        scene.add.rectangle(x, y + 12, 8, 22, 0x8B4513),
+        scene.add.circle(x, y - 5, 16, 0x228B22),
+        scene.add.circle(x - 4, y - 9, 6, 0x32CD32, 0.5)
+    ];
 }
 
 // ==========================================
 // DRAW CASTLE
 // ==========================================
 function drawCastle(scene, x, y, c1, c2) {
-    scene.add.rectangle(x, y, 120, 100, c1).setStrokeStyle(2, c2);
-    scene.add.rectangle(x - 50, y - 20, 30, 60, c2);
-    scene.add.rectangle(x + 50, y - 20, 30, 60, c2);
-    scene.add.triangle(x - 50, y - 55, 0, 20, 10, 0, 20, 20, c2);
-    scene.add.triangle(x + 50, y - 55, 0, 20, 10, 0, 20, 20, c2);
-    scene.add.rectangle(x, y + 25, 25, 35, c2);
-    scene.add.rectangle(x - 20, y - 10, 12, 12, 0xffff88, 0.8);
-    scene.add.rectangle(x + 20, y - 10, 12, 12, 0xffff88, 0.8);
+    return [
+        scene.add.rectangle(x, y, 120, 100, c1).setStrokeStyle(2, c2),
+        scene.add.rectangle(x - 50, y - 20, 30, 60, c2),
+        scene.add.rectangle(x + 50, y - 20, 30, 60, c2),
+        scene.add.triangle(x - 50, y - 55, 0, 20, 10, 0, 20, 20, c2),
+        scene.add.triangle(x + 50, y - 55, 0, 20, 10, 0, 20, 20, c2),
+        scene.add.rectangle(x, y + 25, 25, 35, c2),
+        scene.add.rectangle(x - 20, y - 10, 12, 12, 0xffff88, 0.8),
+        scene.add.rectangle(x + 20, y - 10, 12, 12, 0xffff88, 0.8)
+    ];
 }
 
 // ==========================================
@@ -305,6 +404,9 @@ class Chapter1Scene extends Phaser.Scene {
         this.phase = 'explore';
         this.hasKey = false;
         this.chestOpened = false;
+        this.crystalsCollected = 0;
+        this.crystalsNeeded = 5;
+        this.doorUnlocked = false;
 
         const chT = this.add.text(W / 2, H / 2, 'Chapter 1\nThe Fire Fairy Castle', {
             fontSize: '32px', fontFamily: 'Georgia', color: '#ff8844',
@@ -320,32 +422,41 @@ class Chapter1Scene extends Phaser.Scene {
     }
 
     buildWorld() {
+        this.outdoorEls = [];
         // Grass
-        this.add.rectangle(W / 2, H / 2, W, H, 0x2d5a1e);
+        this.outdoorEls.push(this.add.rectangle(W / 2, H / 2, W, H, 0x2d5a1e));
         for (let i = 0; i < 50; i++) {
-            this.add.circle(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H),
-                Phaser.Math.Between(2, 5), 0x3a7a2a, 0.4);
+            this.outdoorEls.push(this.add.circle(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H),
+                Phaser.Math.Between(2, 5), 0x3a7a2a, 0.4));
         }
         // Dirt paths
-        this.add.rectangle(400, 480, 50, 240, 0x8B7355, 0.5);
-        this.add.rectangle(620, 330, 350, 35, 0x8B7355, 0.4);
+        this.outdoorEls.push(this.add.rectangle(400, 480, 50, 240, 0x8B7355, 0.5));
+        this.outdoorEls.push(this.add.rectangle(620, 330, 350, 35, 0x8B7355, 0.4));
 
         // Castles
-        drawCastle(this, 150, 80, 0x4488cc, 0x2255aa);
-        this.add.text(150, 25, 'Ice Castle', { fontSize: '11px', color: '#aaccff' }).setOrigin(0.5);
-        drawCastle(this, 630, 80, 0xcc4422, 0x882211);
-        this.add.text(630, 25, 'Fire Castle', { fontSize: '11px', color: '#ffaa88' }).setOrigin(0.5);
+        this.outdoorEls.push(...drawCastle(this, 150, 80, 0x4488cc, 0x2255aa));
+        this.outdoorEls.push(this.add.text(150, 25, 'Ice Castle', { fontSize: '11px', color: '#aaccff' }).setOrigin(0.5));
+        this.outdoorEls.push(...drawCastle(this, 630, 80, 0xcc4422, 0x882211));
+        this.outdoorEls.push(this.add.text(630, 25, 'Fire Castle', { fontSize: '11px', color: '#ffaa88' }).setOrigin(0.5));
+
+        // Castle door (visible entrance on the right side)
+        this.castleDoor = this.add.rectangle(695, 115, 22, 35, 0x442200).setStrokeStyle(2, 0x663300).setDepth(6);
+        this.outdoorEls.push(this.castleDoor);
+        const doorLabel = this.add.text(695, 90, '🚪', { fontSize: '14px' }).setOrigin(0.5).setDepth(7);
+        this.outdoorEls.push(doorLabel);
+        this.tweens.add({ targets: doorLabel, y: 86, duration: 600, yoyo: true, repeat: -1 });
 
         // Laser fence
         this.laserFence = this.add.rectangle(390, 90, 6, 170, 0xff00ff, 0.7).setDepth(5);
         this.tweens.add({ targets: this.laserFence, alpha: { from: 0.4, to: 0.9 }, duration: 400, yoyo: true, repeat: -1 });
-        this.add.rectangle(390, 90, 14, 170, 0xff00ff, 0.12).setDepth(4);
+        this.outdoorEls.push(this.laserFence);
+        this.outdoorEls.push(this.add.rectangle(390, 90, 14, 170, 0xff00ff, 0.12).setDepth(4));
 
         // Walls (physics)
         this.walls = this.physics.add.staticGroup();
         // Ice castle
         this.mkWall(150, 80, 140, 120);
-        // Fire castle — block front & top, leave right side open
+        // Fire castle — block front & top, leave right side open for door
         this.mkWall(630, 30, 140, 10);   // top
         this.mkWall(565, 85, 10, 120);   // left (front)
         this.mkWall(630, 145, 90, 10);   // bottom partial
@@ -365,19 +476,32 @@ class Chapter1Scene extends Phaser.Scene {
             [480, 270], [460, 370], [520, 320],
             [290, 530], [180, 570], [430, 540], [550, 500],
         ];
-        tp.forEach(([tx, ty]) => { drawTree(this, tx, ty); this.mkWall(tx, ty + 5, 14, 14); });
+        tp.forEach(([tx, ty]) => { this.outdoorEls.push(...drawTree(this, tx, ty)); this.mkWall(tx, ty + 5, 14, 14); });
 
-        // Chest
-        this.chestRect = this.add.rectangle(710, 160, 26, 20, 0x8B4513)
-            .setStrokeStyle(2, 0xDAA520).setDepth(10);
-        this.chestIcon = this.add.text(710, 140, '🔒', { fontSize: '16px' }).setOrigin(0.5).setDepth(11);
+        // Magical crystals scattered through the forest
+        this.crystals = [];
+        const crystalPositions = [
+            [80, 320], [260, 490], [500, 420], [720, 340], [150, 550]
+        ];
+        crystalPositions.forEach(([cx, cy], i) => {
+            // Crystal glow
+            const glow = this.add.circle(cx, cy, 18, 0xaa44ff, 0.12).setDepth(8);
+            this.outdoorEls.push(glow);
+            this.tweens.add({ targets: glow, scaleX: 1.4, scaleY: 1.4, alpha: 0.05, duration: 800, yoyo: true, repeat: -1 });
+            // Crystal emoji
+            const crystal = this.add.text(cx, cy, '💎', { fontSize: '20px' }).setOrigin(0.5).setDepth(9);
+            this.outdoorEls.push(crystal);
+            this.tweens.add({ targets: crystal, y: cy - 5, duration: 600 + i * 100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+            // Physics zone for pickup
+            const zone = this.add.zone(cx, cy, 30, 30).setDepth(9);
+            this.physics.add.existing(zone, true);
+            this.outdoorEls.push(zone);
+            this.crystals.push({ crystal, glow, zone, collected: false });
+        });
 
-        // Maze entrance
-        this.add.rectangle(755, 220, 32, 32, 0x554433).setStrokeStyle(2, 0x887766).setDepth(5);
-        this.add.text(755, 205, 'MAZE', { fontSize: '9px', color: '#ffddaa', fontStyle: 'bold' }).setOrigin(0.5).setDepth(6);
-        // Arrow indicator
-        const arrow = this.add.text(755, 245, '▲', { fontSize: '12px', color: '#ffdd44' }).setOrigin(0.5).setDepth(6);
-        this.tweens.add({ targets: arrow, y: 240, duration: 500, yoyo: true, repeat: -1 });
+        // Door lock indicator
+        this.doorLockIcon = this.add.text(695, 140, '🔒', { fontSize: '12px' }).setOrigin(0.5).setDepth(8);
+        this.outdoorEls.push(this.doorLockIcon);
 
         // Player
         this.player = createFairy(this, 400, 520, 0x88ff88, 0xaaffaa, false);
@@ -388,19 +512,22 @@ class Chapter1Scene extends Phaser.Scene {
         this.wallCollider = this.physics.add.collider(this.player, this.walls);
 
         // HUD
-        this.add.text(10, 10, 'Chapter 1: Fire Fairy Castle', {
+        this.hudLabel = this.add.text(10, 10, 'Chapter 1: Fire Fairy Castle', {
             fontSize: '14px', color: '#ffdd88', fontStyle: 'bold'
         }).setDepth(1000);
-        this.add.text(10, 28, TOUCH.active ? 'Use the D-pad to move' : 'Arrow keys / WASD to move', {
+        this.hudSub = this.add.text(10, 28, TOUCH.active ? 'Use the D-pad to move' : 'Arrow keys / WASD to move', {
             fontSize: '11px', color: '#aaaaaa'
         }).setDepth(1000);
+        this.crystalHud = this.add.text(W - 10, 10, '💎 0 / 5', {
+            fontSize: '14px', color: '#cc88ff', fontStyle: 'bold'
+        }).setOrigin(1, 0).setDepth(1000);
 
-        // Intro dialog
-        this.time.delayedCall(400, () => {
+        // Start in illustration mode
+        this.time.delayedCall(300, () => {
             showDialog(this, [
                 { speaker: 'Fairy', text: 'Two castles! The Fire Fairy Castle and the Ice Fairy Castle!' },
-                { speaker: 'Fairy', text: "They won't let me in through the front. I need to sneak in from behind!" },
-                TOUCH.active ? 'Use the D-pad to move. Find the maze behind the Fire Castle!' : 'Use arrow keys or WASD to move. Find the maze behind the Fire Castle!'
+                { speaker: 'Fairy', text: "The Fire Castle door is locked! I need to find 5 magical crystals hidden in the forest to unlock it." },
+                TOUCH.active ? 'Use the D-pad to move. Collect all 💎 crystals to unlock the castle door!' : 'Use arrow keys or WASD to move. Collect all 💎 crystals to unlock the castle door!'
             ]);
         });
     }
@@ -415,7 +542,7 @@ class Chapter1Scene extends Phaser.Scene {
         if (!this.player || !this.player.body) return;
         if (this._dialogBlocked) { this.player.body.setVelocity(0); return; }
 
-        if (this.phase === 'explore' || this.phase === 'hasKey') {
+        if (this.phase === 'explore' || this.phase === 'hasKey' || this.phase === 'insideCastle') {
             let vx = 0, vy = 0;
             if (this.cursors.left.isDown || this.wasd.left.isDown || TOUCH.left) vx = -FAIRY_SPEED;
             if (this.cursors.right.isDown || this.wasd.right.isDown || TOUCH.right) vx = FAIRY_SPEED;
@@ -434,23 +561,82 @@ class Chapter1Scene extends Phaser.Scene {
                 this.tweens.add({ targets: sp, alpha: 0, scaleX: 0, scaleY: 0, duration: 400, onComplete: () => sp.destroy() });
             }
 
-            // Maze entrance
-            if (this.phase === 'explore' && !this._dialogActive) {
-                const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, 755, 220);
-                if (d < 30) {
-                    this.phase = 'enteringMaze';
+            // Crystal collection
+            if (this.phase === 'explore' && this.crystals) {
+                this.crystals.forEach(c => {
+                    if (c.collected) return;
+                    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, c.zone.x, c.zone.y);
+                    if (dist < 25) {
+                        c.collected = true;
+                        this.crystalsCollected++;
+                        // Pickup effect
+                        sparkles(this, c.crystal.x, c.crystal.y, 15, 0xaa44ff);
+                        this.tweens.add({ targets: c.crystal, y: c.crystal.y - 40, alpha: 0, scaleX: 2, scaleY: 2, duration: 400, onComplete: () => c.crystal.destroy() });
+                        this.tweens.add({ targets: c.glow, alpha: 0, duration: 300, onComplete: () => c.glow.destroy() });
+                        // Update HUD
+                        this.crystalHud.setText('💎 ' + this.crystalsCollected + ' / ' + this.crystalsNeeded);
+                        // Flash HUD
+                        this.tweens.add({ targets: this.crystalHud, scaleX: 1.3, scaleY: 1.3, duration: 150, yoyo: true });
+
+                        // All crystals collected — unlock the door!
+                        if (this.crystalsCollected >= this.crystalsNeeded) {
+                            this.doorUnlocked = true;
+                            this.player.body.setVelocity(0);
+                            // Door unlock effect
+                            if (this.doorLockIcon) { this.doorLockIcon.setText('✨'); }
+                            this.castleDoor.setFillStyle(0x885500);
+                            this.castleDoor.setStrokeStyle(2, 0xffaa00);
+                            sparkles(this, 695, 115, 25, 0xffdd00);
+                            this.crystalHud.setText('💎 UNLOCKED!');
+                            this.tweens.add({ targets: this.crystalHud, scaleX: 1.4, scaleY: 1.4, duration: 200, yoyo: true });
+                            showDialog(this, [
+                                { speaker: 'Fairy', text: 'All crystals collected! The castle door is unlocked!' },
+                                { speaker: 'Fairy', text: 'Now I can sneak inside the Fire Castle!' },
+                            ]);
+                        }
+                    }
+                });
+            }
+
+            // Fire Castle door — walk to door to enter (only if unlocked)
+            if (this.phase === 'explore' && !this._dialogActive && !this.enteredCastle && this.doorUnlocked) {
+                const doorDist = Phaser.Math.Distance.Between(this.player.x, this.player.y, 695, 115);
+                if (doorDist < 30) {
+                    this.enteredCastle = true;
                     this.player.body.setVelocity(0);
-                    showDialog(this, [
-                        { speaker: 'Fairy', text: 'A maze! The key must be inside!' },
-                        'Tip: Try following the left wall!'
-                    ], () => this.startMaze());
+                    this.enterCastle();
                 }
             }
 
-            // Chest
-            if (this.hasKey && !this.chestOpened && !this._dialogActive) {
-                const cd = Phaser.Math.Distance.Between(this.player.x, this.player.y, 710, 160);
+            // Nudge if player reaches locked door
+            if (this.phase === 'explore' && !this._dialogActive && !this.doorUnlocked && !this.enteredCastle && !this._doorNudged) {
+                const doorDist = Phaser.Math.Distance.Between(this.player.x, this.player.y, 695, 115);
+                if (doorDist < 35) {
+                    this._doorNudged = true;
+                    this.player.body.setVelocity(0);
+                    showDialog(this, [
+                        { speaker: 'Fairy', text: "The door is locked! I need to find all the magical crystals first." },
+                    ], () => { this._doorNudged = false; });
+                }
+            }
+
+            // Inside castle — chest interaction
+            if (this.phase === 'hasKey' && !this.chestOpened && !this._dialogActive) {
+                const cd = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.interiorChestX, this.interiorChestY);
                 if (cd < 35) this.openChest();
+            }
+
+            // Inside castle — maze entrance interaction
+            if (this.phase === 'insideCastle' && !this._dialogActive) {
+                const mazeDist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.mazeEntranceX, this.mazeEntranceY);
+                if (mazeDist < 30) {
+                    this.phase = 'enteringMaze';
+                    this.player.body.setVelocity(0);
+                    showDialog(this, [
+                        { speaker: 'Fairy', text: 'A maze! The key must be hidden inside!' },
+                        'Tip: Try following the left wall!'
+                    ], () => this.startMaze());
+                }
             }
         }
 
@@ -467,6 +653,130 @@ class Chapter1Scene extends Phaser.Scene {
         }
     }
 
+    enterCastle() {
+        // Fairy walks to door, then fade transition into castle interior
+        showDialog(this, [
+            { speaker: 'Fairy', text: "A door! Let me sneak inside the Fire Castle..." },
+        ], () => {
+            // Walk fairy into the door
+            this.tweens.add({
+                targets: this.player, x: 695, y: 115, duration: 600, ease: 'Sine.easeInOut',
+                onComplete: () => {
+                    sparkles(this, 695, 115, 15, 0xff8844);
+                    // Fade to black
+                    const fade = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(2000);
+                    this.tweens.add({
+                        targets: fade, alpha: 1, duration: 500,
+                        onComplete: () => {
+                            // Clear all outdoor elements
+                            this.outdoorEls.forEach(el => { if (el && el.active) el.destroy(); });
+                            if (this.wallCollider) this.wallCollider.active = false;
+                            this.walls.clear(true, true);
+                            // Build interior
+                            this.buildCastleInterior();
+                            // Update HUD
+                            if (this.hudLabel) this.hudLabel.setText('Inside the Fire Castle');
+                            if (this.hudSub) this.hudSub.setText('Find the maze entrance!');
+                            // Fade back in, then illustration mode
+                            this.tweens.add({ targets: fade, alpha: 0, duration: 600, delay: 200, onComplete: () => {
+                                fade.destroy();
+                                showDialog(this, [
+                                    { speaker: 'Fairy', text: "I'm inside the Fire Castle! It's dark and warm in here..." },
+                                    { speaker: 'Fairy', text: "I see a locked chest and a doorway... the maze must be through there!" },
+                                ], () => { this.phase = 'insideCastle'; });
+                            }});
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    buildCastleInterior() {
+        this.interiorEls = [];
+        // Stone floor
+        const floor = this.add.rectangle(W / 2, H / 2, W, H, 0x2a1a0e);
+        this.interiorEls.push(floor);
+        // Floor tile pattern
+        for (let tx = 0; tx < W; tx += 50) {
+            for (let ty = 0; ty < H; ty += 50) {
+                const tile = this.add.rectangle(tx + 25, ty + 25, 48, 48, 0x331f12, 0.5).setStrokeStyle(1, 0x1a0f08, 0.3);
+                this.interiorEls.push(tile);
+            }
+        }
+        // Stone walls around the room
+        const wallColor = 0x553322;
+        const wallStroke = 0x442211;
+        // Top wall
+        this.interiorEls.push(this.add.rectangle(W / 2, 25, W, 50, wallColor).setStrokeStyle(2, wallStroke));
+        // Bottom wall
+        this.interiorEls.push(this.add.rectangle(W / 2, H - 25, W, 50, wallColor).setStrokeStyle(2, wallStroke));
+        // Left wall
+        this.interiorEls.push(this.add.rectangle(25, H / 2, 50, H, wallColor).setStrokeStyle(2, wallStroke));
+        // Right wall
+        this.interiorEls.push(this.add.rectangle(W - 25, H / 2, 50, H, wallColor).setStrokeStyle(2, wallStroke));
+
+        // Torches on walls (animated)
+        const torchPositions = [[100, 55], [300, 55], [500, 55], [700, 55], [100, H - 55], [500, H - 55]];
+        torchPositions.forEach(([tx, ty]) => {
+            const torch = this.add.text(tx, ty, '🔥', { fontSize: '20px' }).setOrigin(0.5).setDepth(10);
+            this.interiorEls.push(torch);
+            this.tweens.add({ targets: torch, scaleX: 1.2, scaleY: 1.3, duration: 300 + Math.random() * 200, yoyo: true, repeat: -1 });
+            // Warm glow
+            const glow = this.add.circle(tx, ty, 25, 0xff6600, 0.08).setDepth(9);
+            this.interiorEls.push(glow);
+            this.tweens.add({ targets: glow, alpha: { from: 0.05, to: 0.12 }, scaleX: { from: 0.9, to: 1.1 }, scaleY: { from: 0.9, to: 1.1 }, duration: 500, yoyo: true, repeat: -1 });
+        });
+
+        // Red carpet leading from entrance to center
+        this.interiorEls.push(this.add.rectangle(400, H - 100, 60, 200, 0x8b1a1a, 0.6));
+        this.interiorEls.push(this.add.rectangle(400, 300, 60, 200, 0x8b1a1a, 0.6));
+
+        // Maze entrance (archway on the left)
+        this.mazeEntranceX = 120;
+        this.mazeEntranceY = 300;
+        const archBg = this.add.rectangle(this.mazeEntranceX, this.mazeEntranceY, 60, 70, 0x0a0015, 0.9).setDepth(5);
+        this.interiorEls.push(archBg);
+        const archFrame = this.add.rectangle(this.mazeEntranceX, this.mazeEntranceY, 64, 74, 0x664422, 0).setStrokeStyle(3, 0x885533).setDepth(6);
+        this.interiorEls.push(archFrame);
+        const mazeLabel = this.add.text(this.mazeEntranceX, this.mazeEntranceY - 50, '🏛️ Maze', { fontSize: '12px', color: '#ffcc66' }).setOrigin(0.5).setDepth(7);
+        this.interiorEls.push(mazeLabel);
+        this.tweens.add({ targets: mazeLabel, y: this.mazeEntranceY - 54, duration: 500, yoyo: true, repeat: -1 });
+
+        // Locked chest (on the right side)
+        this.interiorChestX = 650;
+        this.interiorChestY = 300;
+        this.chestRect = this.add.rectangle(this.interiorChestX, this.interiorChestY, 35, 25, 0x8B4513).setStrokeStyle(2, 0xDAA520).setDepth(10);
+        this.interiorEls.push(this.chestRect);
+        this.chestIcon = this.add.text(this.interiorChestX, this.interiorChestY, '🔒', { fontSize: '16px' }).setOrigin(0.5).setDepth(11);
+        this.interiorEls.push(this.chestIcon);
+        const chestLabel = this.add.text(this.interiorChestX, this.interiorChestY - 25, 'Locked Chest', { fontSize: '10px', color: '#DAA520' }).setOrigin(0.5).setDepth(11);
+        this.interiorEls.push(chestLabel);
+
+        // Fire Castle banner
+        this.interiorEls.push(this.add.text(W / 2, 12, '🏰 Inside the Fire Castle', {
+            fontSize: '11px', color: '#ff8855', fontStyle: 'italic'
+        }).setOrigin(0.5).setDepth(12));
+
+        // Physics walls for interior
+        this.walls = this.physics.add.staticGroup();
+        // Top wall
+        this.mkWall(W / 2, 5, W, 50);
+        // Bottom wall
+        this.mkWall(W / 2, H - 5, W, 50);
+        // Left wall (with gap for maze)
+        this.mkWall(25, 150, 50, 250);   // top section
+        this.mkWall(25, 450, 50, 250);   // bottom section
+        // Right wall
+        this.mkWall(W - 25, H / 2, 50, H);
+
+        this.wallCollider = this.physics.add.collider(this.player, this.walls);
+
+        // Place player at bottom center (just entered)
+        this.player.setPosition(400, H - 80);
+        this.player.setDepth(100);
+    }
+
     startMaze() {
         this.phase = 'maze';
         this.wallCollider.active = false;
@@ -476,21 +786,25 @@ class Chapter1Scene extends Phaser.Scene {
         this.mazeHint = this.add.text(W / 2, 42, 'Find the key! Hint: follow the left wall', { fontSize: '12px', color: '#999' }).setOrigin(0.5).setDepth(510);
 
         const MAZE = [
-            [1,1,1,1,1,1,1,1,1,1,1,1,1],
-            [0,0,0,0,0,0,0,0,0,0,0,0,1],
-            [1,0,1,1,1,1,1,1,1,1,1,1,1],
-            [1,0,0,0,0,0,1,0,0,0,0,0,1],
-            [1,0,1,0,1,0,1,0,1,1,1,0,1],
-            [1,0,1,0,1,0,0,0,1,0,0,0,1],
-            [1,0,1,0,1,1,1,1,1,0,1,1,1],
-            [1,0,1,0,0,0,0,0,0,0,0,0,1],
-            [1,0,1,1,1,1,1,1,1,1,1,0,1],
-            [1,0,0,0,0,0,0,0,0,0,0,2,1],
-            [1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [0,0,1,0,0,0,0,0,1,0,0,0,1,0,0,0,1],
+            [1,0,1,0,1,1,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,0,0,1,0,0,0,0,0,1,0,0,0,1,0,1],
+            [1,1,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1],
+            [1,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1],
+            [1,0,1,1,1,1,1,0,1,0,1,0,1,1,1,1,1],
+            [1,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,1],
+            [1,0,1,1,1,1,1,1,1,0,1,1,1,1,1,0,1],
+            [1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1],
+            [1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,0,1],
+            [1,0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,1],
+            [1,1,1,1,1,0,1,0,1,0,1,0,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,2,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
         ];
-        const cs = 45;
+        const cs = 34;
         const ox = (W - MAZE[0].length * cs) / 2;
-        const oy = 58;
+        const oy = 55;
 
         this.mazeWalls = this.physics.add.staticGroup();
         this.mazeEls = [];
@@ -511,7 +825,7 @@ class Chapter1Scene extends Phaser.Scene {
                     this.mazeEls.push(f);
                     if (MAZE[r][c] === 2) {
                         keyPos = { x, y };
-                        this.mazeKeyIcon = this.add.text(x, y, '🔑', { fontSize: '22px' }).setOrigin(0.5).setDepth(520);
+                        this.mazeKeyIcon = this.add.text(x, y, '🔑', { fontSize: '18px' }).setOrigin(0.5).setDepth(520);
                         this.mazeEls.push(this.mazeKeyIcon);
                         this.time.addEvent({
                             delay: 600, loop: true,
@@ -556,13 +870,15 @@ class Chapter1Scene extends Phaser.Scene {
         if (this.mazeCollider) this.mazeCollider.active = false;
         this.mazeWalls.clear(true, true);
         this.wallCollider.active = true;
-        this.player.setPosition(710, 200);
+        // Return to castle interior near the maze entrance
+        this.player.setPosition(this.mazeEntranceX + 60, this.mazeEntranceY);
         this.player.setDepth(100);
         this.phase = 'hasKey';
         this.chestIcon.setText('🔑');
-        // Arrow to chest
-        const arr = this.add.text(710, 130, '⬇ chest', { fontSize: '12px', color: '#ffdd44' }).setOrigin(0.5).setDepth(15);
-        this.tweens.add({ targets: arr, y: 135, duration: 400, yoyo: true, repeat: -1 });
+        sparkles(this, this.player.x, this.player.y, 10, 0xffd700);
+        // Arrow pointing to chest
+        const arr = this.add.text(this.interiorChestX, this.interiorChestY - 35, '⬇ chest', { fontSize: '12px', color: '#ffdd44' }).setOrigin(0.5).setDepth(15);
+        this.tweens.add({ targets: arr, y: this.interiorChestY - 40, duration: 400, yoyo: true, repeat: -1 });
     }
 
     openChest() {
@@ -571,25 +887,27 @@ class Chapter1Scene extends Phaser.Scene {
         this.player.body.setVelocity(0);
 
         // Chest open animation: lid flies up, golden glow expands, items float out
+        const cx = this.interiorChestX;
+        const cy = this.interiorChestY;
         this.chestRect.setFillStyle(0xDAA520);
         this.chestIcon.setText('');
-        const lid = this.add.rectangle(710, 148, 28, 8, 0xCD853F).setDepth(200);
-        this.tweens.add({ targets: lid, y: 115, angle: -40, alpha: 0, duration: 600 });
+        const lid = this.add.rectangle(cx, cy - 12, 28, 8, 0xCD853F).setDepth(200);
+        this.tweens.add({ targets: lid, y: cy - 45, angle: -40, alpha: 0, duration: 600 });
         // Golden glow ring
-        const glow = this.add.circle(710, 160, 5, 0xffd700, 0.6).setDepth(199);
+        const glow = this.add.circle(cx, cy, 5, 0xffd700, 0.6).setDepth(199);
         this.tweens.add({ targets: glow, scaleX: 8, scaleY: 8, alpha: 0, duration: 1000, onComplete: () => glow.destroy() });
         // Power icons float up from chest
         const icons = ['🌀', '🏹', '⚔️', '🔥'];
         icons.forEach((ico, i) => {
-            const t = this.add.text(710, 160, ico, { fontSize: '24px' }).setOrigin(0.5).setDepth(201).setAlpha(0);
+            const t = this.add.text(cx, cy, ico, { fontSize: '24px' }).setOrigin(0.5).setDepth(201).setAlpha(0);
             this.tweens.add({
-                targets: t, alpha: 1, y: 80 + i * 28, x: 710 + (i - 1.5) * 35, duration: 600,
+                targets: t, alpha: 1, y: cy - 80 + i * 28, x: cx + (i - 1.5) * 35, duration: 600,
                 delay: 400 + i * 200, ease: 'Back.easeOut',
                 onComplete: () => { this.tweens.add({ targets: t, alpha: 0, y: t.y - 20, duration: 500, delay: 800 }); }
             });
         });
-        sparkles(this, 710, 160, 30, 0xffd700);
-        this.time.delayedCall(600, () => sparkles(this, 710, 140, 20, 0xffaa00));
+        sparkles(this, cx, cy, 30, 0xffd700);
+        this.time.delayedCall(600, () => sparkles(this, cx, cy - 20, 20, 0xffaa00));
 
         STATE.powers.push('Teleportation', 'Fire Arrow', 'Fire Sword', 'Fireball');
         this.time.delayedCall(800, () => {
@@ -605,36 +923,96 @@ class Chapter1Scene extends Phaser.Scene {
     }
 
     chapterDone() {
+        // Chapter complete title
         const ov = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(3000);
         this.tweens.add({
             targets: ov, alpha: 0.85, duration: 800,
             onComplete: () => {
-                this.add.text(W / 2, 200, 'Chapter 1 Complete!', {
+                this.add.text(W / 2, 150, 'Chapter 1 Complete!', {
                     fontSize: '36px', fontFamily: 'Georgia', color: '#ffd700', fontStyle: 'bold'
                 }).setOrigin(0.5).setDepth(3001);
-                this.add.text(W / 2, 260, '🌀 Teleportation   🏹 Fire Arrow   ⚔️ Fire Sword   🔥 Fireball', {
+                this.add.text(W / 2, 210, '🌀 Teleportation   🏹 Fire Arrow   ⚔️ Fire Sword   🔥 Fireball', {
                     fontSize: '14px', color: '#ffaa44'
                 }).setOrigin(0.5).setDepth(3001);
-                const b = this.add.rectangle(W / 2, 380, 200, 50, 0x44aa44)
-                    .setStrokeStyle(2, 0x66cc66).setDepth(3001).setInteractive({ useHandCursor: true });
-                this.add.text(W / 2, 380, 'Continue →', { fontSize: '22px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setDepth(3002);
-                b.on('pointerdown', () => {
-                    // Teleportation swirl animation
-                    for (let i = 0; i < 20; i++) {
-                        const angle = (i / 20) * Math.PI * 2;
-                        const r = 30 + i * 8;
-                        const sx = W / 2 + Math.cos(angle) * r;
-                        const sy = H / 2 + Math.sin(angle) * r;
-                        const swirl = this.add.circle(sx, sy, 4, 0x44ccff, 0.8).setDepth(3005);
+
+                // Teleport portal (animated ring)
+                const portalX = W / 2, portalY = 360;
+                const ring1 = this.add.circle(portalX, portalY, 45, 0x44ccff, 0).setStrokeStyle(3, 0x44ccff).setDepth(3001);
+                const ring2 = this.add.circle(portalX, portalY, 35, 0x8844ff, 0).setStrokeStyle(2, 0x8844ff).setDepth(3001);
+                const ring3 = this.add.circle(portalX, portalY, 55, 0x44ccff, 0).setStrokeStyle(1, 0x66ddff, 0.4).setDepth(3001);
+                this.tweens.add({ targets: ring1, angle: 360, duration: 3000, repeat: -1 });
+                this.tweens.add({ targets: ring2, angle: -360, duration: 2000, repeat: -1 });
+                this.tweens.add({ targets: ring3, scaleX: { from: 0.8, to: 1.2 }, scaleY: { from: 0.8, to: 1.2 }, alpha: { from: 1, to: 0.3 }, duration: 1000, yoyo: true, repeat: -1 });
+                // Portal center glow
+                const portalGlow = this.add.circle(portalX, portalY, 20, 0x44ccff, 0.15).setDepth(3001);
+                this.tweens.add({ targets: portalGlow, scaleX: 1.5, scaleY: 1.5, alpha: 0.05, duration: 800, yoyo: true, repeat: -1 });
+                // Swirl emoji
+                const swirlIcon = this.add.text(portalX, portalY, '🌀', { fontSize: '32px' }).setOrigin(0.5).setDepth(3002);
+                this.tweens.add({ targets: swirlIcon, angle: 360, duration: 2000, repeat: -1 });
+                // Portal particles
+                this.time.addEvent({
+                    delay: 150, loop: true, callback: () => {
+                        const a = Math.random() * Math.PI * 2;
+                        const r = 50 + Math.random() * 20;
+                        const px = portalX + Math.cos(a) * r;
+                        const py = portalY + Math.sin(a) * r;
+                        const p = this.add.circle(px, py, 2, 0x44ccff, 0.7).setDepth(3002);
+                        this.tweens.add({ targets: p, x: portalX, y: portalY, alpha: 0, scaleX: 0, scaleY: 0, duration: 500, onComplete: () => p.destroy() });
+                    }
+                });
+
+                // Teleport button
+                const btn = this.add.rectangle(portalX, portalY + 90, 220, 50, 0x3366cc)
+                    .setStrokeStyle(2, 0x44ccff).setDepth(3003).setInteractive({ useHandCursor: true });
+                const btnTxt = this.add.text(portalX, portalY + 90, '🌀 TELEPORT', {
+                    fontSize: '22px', color: '#ffffff', fontStyle: 'bold'
+                }).setOrigin(0.5).setDepth(3004);
+                // Button pulse
+                this.tweens.add({ targets: btn, scaleX: 1.05, scaleY: 1.05, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+                this.tweens.add({ targets: btnTxt, scaleX: 1.05, scaleY: 1.05, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+                btn.on('pointerover', () => { btn.setFillStyle(0x4488dd); });
+                btn.on('pointerout', () => { btn.setFillStyle(0x3366cc); });
+
+                btn.on('pointerdown', () => {
+                    btn.disableInteractive();
+
+                    // Phase 1: Fairy gets pulled into portal
+                    // Expanding rings burst outward
+                    for (let i = 0; i < 5; i++) {
+                        const burst = this.add.circle(portalX, portalY, 10, 0x44ccff, 0).setStrokeStyle(3, 0x44ccff).setDepth(3005);
                         this.tweens.add({
-                            targets: swirl, x: W / 2, y: H / 2, scaleX: 0, scaleY: 0, alpha: 0,
-                            duration: 600, delay: i * 30, ease: 'Cubic.easeIn',
-                            onComplete: () => swirl.destroy()
+                            targets: burst, scaleX: 6 + i * 2, scaleY: 6 + i * 2, alpha: { from: 0.8, to: 0 },
+                            duration: 600, delay: i * 100, onComplete: () => burst.destroy()
                         });
                     }
-                    const flash = this.add.rectangle(W / 2, H / 2, W, H, 0x88ddff, 0).setDepth(3010);
-                    this.tweens.add({ targets: flash, alpha: 1, duration: 700, delay: 300 });
-                    this.time.delayedCall(1000, () => this.scene.start('Chapter2Scene'));
+
+                    // Phase 2: Swirl particles spiral inward
+                    this.time.delayedCall(200, () => {
+                        for (let i = 0; i < 40; i++) {
+                            const angle = (i / 40) * Math.PI * 4;
+                            const dist = 200 - i * 4;
+                            const sx = portalX + Math.cos(angle) * dist;
+                            const sy = portalY + Math.sin(angle) * dist;
+                            const color = i % 2 === 0 ? 0x44ccff : 0x8844ff;
+                            const s = this.add.circle(sx, sy, 3, color, 0.9).setDepth(3006);
+                            this.tweens.add({
+                                targets: s, x: portalX, y: portalY, scaleX: 0, scaleY: 0, alpha: 0,
+                                duration: 800, delay: i * 20, ease: 'Cubic.easeIn',
+                                onComplete: () => s.destroy()
+                            });
+                        }
+                    });
+
+                    // Phase 3: Screen flash and transition
+                    this.time.delayedCall(900, () => {
+                        const flash = this.add.rectangle(W / 2, H / 2, W, H, 0x88ddff, 0).setDepth(3010);
+                        this.tweens.add({
+                            targets: flash, alpha: 1, duration: 400,
+                            onComplete: () => {
+                                this.time.delayedCall(300, () => this.scene.start('Chapter2Scene'));
+                            }
+                        });
+                    });
                 });
             }
         });
@@ -736,19 +1114,24 @@ class Chapter2Scene extends Phaser.Scene {
             }
         });
 
-        // Shoot on click
+        // Track facing direction for directional shooting
+        this.facingX = 0;
+        this.facingY = -1; // default: shoot up
+
+        // Shoot on click (aim at click) or spacebar (aim in facing direction)
         this.input.on('pointerdown', (p) => {
             if (this._dialogActive || this.phase !== 'fight') return;
             this.shoot(p);
         });
+        this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-        // Intro dialog
-        this.time.delayedCall(500, () => {
+        // Start in illustration mode
+        this.time.delayedCall(300, () => {
             showDialog(this, [
                 { speaker: 'Fairy', text: 'I teleported behind the Ice Fairy Castle!' },
-                { speaker: '🔥 Fire Fairy', text: 'You stole our powers! I will stop you!' },
+                { speaker: 'Fire Fairy', text: 'You stole our powers! I will stop you!' },
                 { speaker: 'Fairy', text: "I'll fight her with fireballs!" },
-                TOUCH.active ? 'Use the D-pad to move and the fire button to shoot!' : 'Click to shoot fireballs at the Fire Fairy! Dodge her attacks!'
+                TOUCH.active ? 'Use the D-pad to move and the fire button to shoot in the direction you\'re moving!' : 'Use WASD to move. Press SPACE to shoot in the direction you\'re moving, or click to aim!'
             ], () => { this.phase = 'fight'; });
         });
     }
@@ -909,9 +1292,22 @@ class Chapter2Scene extends Phaser.Scene {
         else if (vx > 0) this.player.setAngle(8);
         else this.player.setAngle(0);
 
-        // Touch fire button — auto-aim at boss
-        if (TOUCH.fire && this.boss && this.boss.active && this.bossHP > 0) {
-            this.shoot({ x: this.boss.x, y: this.boss.y });
+        // Update facing direction when moving
+        if (vx !== 0 || vy !== 0) {
+            this.facingX = vx;
+            this.facingY = vy;
+        }
+
+        // Spacebar shoot — fires in facing direction
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && this.phase === 'fight' && !this._dialogActive) {
+            const dist = 300;
+            this.shoot({ x: this.player.x + this.facingX * dist, y: this.player.y + this.facingY * dist });
+        }
+
+        // Touch fire button — shoot in facing direction
+        if (TOUCH.fire && this.phase === 'fight' && this.boss && this.boss.active && this.bossHP > 0) {
+            const dist = 300;
+            this.shoot({ x: this.player.x + this.facingX * dist, y: this.player.y + this.facingY * dist });
             TOUCH.fire = false;
         }
 
@@ -995,6 +1391,29 @@ class Chapter3Scene extends Phaser.Scene {
         this.witch.add(this.add.circle(20, -24, 6, 0xaa44ff));
         this.witch.setDepth(80);
         this.tweens.add({ targets: this.witch, y: this.witch.y - 5, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        // Witch teleports to random positions during fight
+        this.witchMoveTimer = this.time.addEvent({
+            delay: 3500, loop: true, callback: () => {
+                if (this.phase !== 'fight' || !this.witch || !this.witch.active) return;
+                // Poof particles at old position
+                sparkles(this, this.witch.x, this.witch.y, 12, 0xaa44ff);
+                this.witch.setAlpha(0);
+                // New position: random but away from player
+                let nx, ny, attempts = 0;
+                do {
+                    nx = Phaser.Math.Between(200, W - 80);
+                    ny = Phaser.Math.Between(H - 200, H - 90);
+                    attempts++;
+                } while (Phaser.Math.Distance.Between(nx, ny, this.player.x, this.player.y) < 120 && attempts < 10);
+                this.time.delayedCall(400, () => {
+                    if (!this.witch || !this.witch.active) return;
+                    this.witch.x = nx;
+                    this.witch.y = ny;
+                    this.witch.setAlpha(1);
+                    sparkles(this, nx, ny, 12, 0xaa44ff);
+                });
+            }
+        });
 
         // Player
         this.player = createFairy(this, 150, H - 110, 0x88ff88, 0xaaffaa, false);
@@ -1016,19 +1435,24 @@ class Chapter3Scene extends Phaser.Scene {
         this.physics.add.overlap(this.iceBalls, this.brooms, (ball, broom) => { this.freezeBroom(ball, broom); });
         this.physics.add.overlap(this.brooms, this.player, (player, broom) => { this.broomHit(broom); });
 
-        // Shoot
+        // Track facing direction for directional shooting
+        this.facingX = 0;
+        this.facingY = -1; // default: shoot up
+
+        // Shoot on click (aim at click) or spacebar (aim in facing direction)
         this.input.on('pointerdown', (p) => {
             if (this._dialogActive || (this.phase !== 'fight' && this.phase !== 'findFire')) return;
             this.shootIce(p);
         });
+        this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-        // Intro
-        this.time.delayedCall(500, () => {
+        // Start in illustration mode
+        this.time.delayedCall(300, () => {
             showDialog(this, [
                 { speaker: 'Fairy', text: "I'm at the top of the tower!" },
-                { speaker: '🧙 Witch', text: 'Hehehe! No one enters MY tower! Take this!' },
+                { speaker: 'Witch', text: 'Hehehe! No one enters MY tower! Take this!' },
                 { speaker: 'Fairy', text: "She's sending brooms! I'll freeze them with ice!" },
-                TOUCH.active ? 'Use the D-pad to dodge and fire button to freeze brooms!' : 'Click to shoot ice balls! Freeze 3 brooms!'
+                TOUCH.active ? 'Use the D-pad to move and the fire button to shoot in the direction you\'re moving!' : 'Use WASD to move. Press SPACE to shoot in the direction you\'re moving, or click to aim!'
             ], () => { this.phase = 'fight'; this.launchBroom(); });
         });
     }
@@ -1060,12 +1484,15 @@ class Chapter3Scene extends Phaser.Scene {
         this.brooms.add(broom);
         this.physics.add.existing(broom);
         broom.body.setSize(40, 16);
+        // Brooms get faster as fight progresses
+        const broomSpeed = 140 + this.frozen * 30;
         const a = Phaser.Math.Angle.Between(broom.x, broom.y, this.player.x + Phaser.Math.Between(-40, 40), this.player.y + Phaser.Math.Between(-20, 20));
-        broom.body.setVelocity(Math.cos(a) * 140, Math.sin(a) * 140);
+        broom.body.setVelocity(Math.cos(a) * broomSpeed, Math.sin(a) * broomSpeed);
         broom.angle = Phaser.Math.RadToDeg(a);
         this.time.delayedCall(4000, () => { if (broom.active) broom.destroy(); });
-        // Next broom
-        this.time.delayedCall(2200, () => this.launchBroom());
+        // Next broom — comes faster too
+        const nextDelay = Math.max(1200, 2200 - this.frozen * 300);
+        this.time.delayedCall(nextDelay, () => this.launchBroom());
     }
 
     freezeBroom(ball, broom) {
@@ -1110,9 +1537,9 @@ class Chapter3Scene extends Phaser.Scene {
 
         this.time.delayedCall(1200, () => {
             showDialog(this, [
-                { speaker: '☀️ Sun God', text: 'Brave fairy! The witch will send more brooms soon.' },
-                { speaker: '☀️ Sun God', text: 'Step on the fire to defeat her! There is no other way!' },
-                { speaker: '☀️ Sun God', text: 'Hurry, before she regains her power!' }
+                { speaker: 'Sun God', text: 'Brave fairy! The witch will send more brooms soon.' },
+                { speaker: 'Sun God', text: 'Step on the fire to defeat her! There is no other way!' },
+                { speaker: 'Sun God', text: 'Hurry, before she regains her power!' }
             ], () => {
                 this.tweens.add({
                     targets: [ov, sun, rays, e1, e2], alpha: 0, duration: 800,
@@ -1149,16 +1576,12 @@ class Chapter3Scene extends Phaser.Scene {
     }
 
     defeatWitch() {
-        this.phase = 'witchDead';
+        // Instead of instant kill — fire powers up the fairy, then BOSS FIGHT begins!
+        this.phase = 'witchPowerUp';
         this.player.body.setVelocity(0);
+        if (this.witchMoveTimer) this.witchMoveTimer.remove();
 
-        // Player powers up: grows 2x with flame aura
-        this.tweens.add({ targets: this.player, scaleX: 2, scaleY: 2, duration: 600, ease: 'Back.easeOut' });
-        // Fire aura around player
-        const aura = this.add.circle(this.player.x, this.player.y, 30, 0xff6600, 0.25).setDepth(99);
-        this.tweens.add({ targets: aura, scaleX: 2.5, scaleY: 2.5, alpha: 0.1, duration: 500, yoyo: true, repeat: 3 });
-
-        // Fire pillar erupts
+        // Fire pillar erupts — fairy absorbs the fire
         for (let i = 0; i < 30; i++) {
             const fx = this.fire.x + Phaser.Math.Between(-20, 20);
             const fy = this.fire.y;
@@ -1166,25 +1589,100 @@ class Chapter3Scene extends Phaser.Scene {
             this.tweens.add({ targets: flame, y: fy - Phaser.Math.Between(60, 200), alpha: 0, scaleX: 0, scaleY: 0, duration: Phaser.Math.Between(400, 900), delay: Phaser.Math.Between(0, 400), onComplete: () => flame.destroy() });
         }
         sparkles(this, this.fire.x, this.fire.y, 25, 0xff4400);
+        this.time.delayedCall(500, () => { if (this.fire) this.fire.destroy(); if (this.fireZone) this.fireZone.destroy(); });
 
-        // Witch disintegrates with dramatic spin + purple explosion
-        this.time.delayedCall(600, () => {
-            for (let ring = 0; ring < 3; ring++) {
-                const r = this.add.circle(this.witch.x, this.witch.y, 5, 0xaa44ff, 0.4).setDepth(200);
-                this.tweens.add({ targets: r, scaleX: 10 + ring * 3, scaleY: 10 + ring * 3, alpha: 0, duration: 700, delay: ring * 120, onComplete: () => r.destroy() });
+        // Player powers up flash
+        this.tweens.add({ targets: this.player, scaleX: 1.5, scaleY: 1.5, duration: 400, yoyo: true, ease: 'Back.easeOut' });
+        const aura = this.add.circle(this.player.x, this.player.y, 30, 0xff6600, 0.25).setDepth(99);
+        this.tweens.add({ targets: aura, scaleX: 2.5, scaleY: 2.5, alpha: 0, duration: 800, onComplete: () => aura.destroy() });
+
+        this.time.delayedCall(800, () => {
+            showDialog(this, [
+                { speaker: 'Fairy', text: "The fire gave me power! Now I can fight the witch directly!" },
+                { speaker: 'Witch', text: "You think a little fire can stop ME?! Come and fight!" },
+                TOUCH.active ? 'Boss fight! Use D-pad to dodge and fire button to shoot!' : 'Boss fight! Use WASD to dodge, SPACE or click to shoot!'
+            ], () => this.startWitchBoss());
+        });
+    }
+
+    startWitchBoss() {
+        this.phase = 'bossFight';
+        this.witchHP = 8;
+        this.witchMaxHP = 8;
+        this.witchBullets = this.physics.add.group();
+        this.witchBDir = { x: 1.5, y: 1 };
+        this.witchBTimer = 0;
+        this.cooldown = 0;
+
+        // Make witch visible and active for the fight
+        if (this.witch) this.witch.setAlpha(1);
+
+        // Update HUD for boss fight
+        this.broomText.setText('Witch: ' + '🟣'.repeat(this.witchHP));
+        this.hpText.setText('You: ' + '❤️'.repeat(Math.max(0, this.playerHP)));
+
+        // Player bullets hit witch
+        this.physics.add.overlap(this.iceBalls, this.witch, (witch, b) => {
+            if (this.phase !== 'bossFight') return;
+            b.destroy();
+            this.witchHP--;
+            sparkles(this, this.witch.x, this.witch.y, 8, 0xaa44ff);
+            this.cameras.main.shake(100, 0.005);
+            this.broomText.setText('Witch: ' + '🟣'.repeat(Math.max(0, this.witchHP)) + '⬛'.repeat(Math.max(0, this.witchMaxHP - this.witchHP)));
+            // Witch flash red
+            if (this.witch && this.witch.active) {
+                this.tweens.add({ targets: this.witch, alpha: 0.3, duration: 80, yoyo: true, repeat: 2 });
             }
-            this.tweens.add({
-                targets: this.witch, alpha: 0, scaleX: 1.5, scaleY: 1.5, angle: 720, duration: 1200,
-                onComplete: () => {
-                    sparkles(this, this.witch.x, this.witch.y, 30, 0xaa44ff);
-                    this.witch.destroy();
-                    this.fire.destroy();
-                    aura.destroy();
-                    // Reset player size
-                    this.tweens.add({ targets: this.player, scaleX: 1, scaleY: 1, duration: 400 });
-                    this.hatScene();
-                }
-            });
+            if (this.witchHP <= 0) {
+                this.witchDead();
+            }
+        });
+
+        // Witch bullets hit player
+        this.physics.add.overlap(this.witchBullets, this.player, (player, b) => {
+            if (this.phase !== 'bossFight') return;
+            b.destroy();
+            this.playerHP--;
+            sparkles(this, this.player.x, this.player.y, 6, 0xff4444);
+            this.cameras.main.shake(200, 0.008);
+            this.hpText.setText('You: ' + '❤️'.repeat(Math.max(0, this.playerHP)) + '🖤'.repeat(Math.max(0, 5 - this.playerHP)));
+            if (this.playerHP <= 0) {
+                this.phase = 'dead';
+                showDialog(this, ['The witch got you!', "Let's try again!"], () => this.scene.restart());
+            }
+        });
+    }
+
+    witchShoot() {
+        if (!this.witch || !this.witch.active || this.phase !== 'bossFight') return;
+        // Shoot 3 spread projectiles
+        for (let i = -1; i <= 1; i++) {
+            const b = this.add.circle(this.witch.x, this.witch.y, 5, 0xaa44ff).setDepth(95);
+            this.witchBullets.add(b);
+            this.physics.add.existing(b);
+            const a = Phaser.Math.Angle.Between(this.witch.x, this.witch.y, this.player.x, this.player.y) + i * 0.25;
+            b.body.setVelocity(Math.cos(a) * 160, Math.sin(a) * 160);
+            this.time.delayedCall(3000, () => { if (b.active) b.destroy(); });
+        }
+    }
+
+    witchDead() {
+        this.phase = 'witchDead';
+        this.player.body.setVelocity(0);
+
+        // Dramatic witch defeat: explosion rings + spin + disintegrate
+        for (let ring = 0; ring < 4; ring++) {
+            const r = this.add.circle(this.witch.x, this.witch.y, 5, 0xaa44ff, 0.5).setDepth(200);
+            this.tweens.add({ targets: r, scaleX: 12 + ring * 3, scaleY: 12 + ring * 3, alpha: 0, duration: 700, delay: ring * 120, onComplete: () => r.destroy() });
+        }
+        sparkles(this, this.witch.x, this.witch.y, 35, 0xaa44ff);
+        this.tweens.add({
+            targets: this.witch, alpha: 0, scaleX: 1.5, scaleY: 1.5, angle: 720, duration: 1200,
+            onComplete: () => {
+                sparkles(this, this.witch.x, this.witch.y, 30, 0xaa44ff);
+                this.witch.destroy();
+                this.hatScene();
+            }
         });
     }
 
@@ -1198,10 +1696,10 @@ class Chapter3Scene extends Phaser.Scene {
         this.tweens.add({ targets: hat, y: hat.y - 8, duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
         showDialog(this, [
-            { speaker: '🎩 Hat', text: 'I can talk! The witch cursed me long ago...' },
-            { speaker: '🎩 Hat', text: 'The Sun and Moon gods weakened her, but I was still trapped!' },
-            { speaker: '🎩 Hat', text: "Wear me and I'll give you MAGICAL POWERS!" },
-            { speaker: '🎩 Hat', text: "You'll need them in Chapter 15... trust me!" },
+            { speaker: 'Hat', text: 'I can talk! The witch cursed me long ago...' },
+            { speaker: 'Hat', text: 'The Sun and Moon gods weakened her, but I was still trapped!' },
+            { speaker: 'Hat', text: "Wear me and I'll give you MAGICAL POWERS!" },
+            { speaker: 'Hat', text: "You'll need them in Chapter 15... trust me!" },
             { speaker: 'Fairy', text: "Of course! Let's do this!" },
         ], () => {
             // Hat flies to player with trail
@@ -1239,11 +1737,80 @@ class Chapter3Scene extends Phaser.Scene {
                             '🪄 Staff Powers: Immobilize & Silence!',
                             '⚡ Super Speed acquired!',
                             '🧊 Freezing, 🌋 Lava, and 🦘 Super Jump acquired!',
-                            { speaker: '🎩 Hat', text: 'Remember: save the strongest powers for Chapter 15!' },
+                            { speaker: 'Hat', text: 'Remember: save the strongest powers for Chapter 15!' },
                             { speaker: 'Fairy', text: "I found the wizard's staff too! What an adventure!" }
-                        ], () => this.chapterDone());
+                        ], () => this.showFairyWithHat());
                     });
                 }
+            });
+        });
+    }
+
+    showFairyWithHat() {
+        // Full-screen dramatic reveal of fairy wearing the hat
+        const ov = this.add.rectangle(W / 2, H / 2, W, H, 0x0a0020, 0).setDepth(4000);
+        this.tweens.add({ targets: ov, alpha: 1, duration: 600 });
+
+        this.time.delayedCall(700, () => {
+            // Spotlight effect
+            const spotlight = this.add.circle(W / 2, 280, 80, 0x221144, 0.4).setDepth(4001);
+            this.tweens.add({ targets: spotlight, scaleX: 1.8, scaleY: 1.8, alpha: 0.15, duration: 1500, yoyo: true, repeat: -1 });
+
+            // Big fairy in center
+            const bigFairy = createFairy(this, W / 2, 300, 0x88ff88, 0xaaffaa, true);
+            bigFairy.setScale(3).setDepth(4005);
+
+            // Hat on the fairy
+            const bigHat = this.add.container(W / 2, 260);
+            bigHat.add(this.add.triangle(0, 0, -20, 20, 0, -20, 20, 20, 0x440088));
+            bigHat.add(this.add.rectangle(0, 17, 48, 7, 0x440088));
+            bigHat.add(this.add.circle(-7, 7, 3, 0xffdd00));
+            bigHat.add(this.add.circle(7, 7, 3, 0xffdd00));
+            bigHat.setScale(3).setDepth(4006).setAlpha(0);
+            this.tweens.add({ targets: bigHat, alpha: 1, y: 245, duration: 800, delay: 300, ease: 'Bounce.easeOut' });
+
+            // Staff
+            const staff = this.add.container(W / 2 + 55, 320);
+            staff.add(this.add.rectangle(0, 0, 6, 70, 0x8B4513));
+            staff.add(this.add.circle(0, -35, 10, 0xaa44ff));
+            staff.setScale(3).setDepth(4004).setAlpha(0);
+            this.tweens.add({ targets: staff, alpha: 1, duration: 600, delay: 600 });
+
+            // Rotating sparkles around the fairy
+            for (let i = 0; i < 12; i++) {
+                const angle = (i / 12) * Math.PI * 2;
+                const dist = 120;
+                const s = this.add.circle(W / 2 + Math.cos(angle) * dist, 280 + Math.sin(angle) * dist, 4, [0xffd700, 0x88ddff, 0xaa44ff, 0xff8844][i % 4], 0.7).setDepth(4003);
+                this.tweens.add({
+                    targets: s, angle: 360, duration: 3000, repeat: -1,
+                    x: { value: W / 2 + Math.cos(angle + Math.PI) * dist, duration: 3000, repeat: -1 },
+                    y: { value: 280 + Math.sin(angle + Math.PI) * dist, duration: 3000, repeat: -1 }
+                });
+            }
+
+            // Title
+            const title = this.add.text(W / 2, 440, 'The Fairy is ready for Chapter 15!', {
+                fontSize: '22px', fontFamily: 'Georgia', color: '#ffd700', fontStyle: 'bold'
+            }).setOrigin(0.5).setDepth(4010).setAlpha(0);
+            this.tweens.add({ targets: title, alpha: 1, duration: 800, delay: 1000 });
+            this.tweens.add({ targets: title, y: 435, duration: 1500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: 1000 });
+
+            // Continue prompt
+            const cont = this.add.text(W / 2, 510, TOUCH.active ? '[ tap to continue ]' : '[ click to continue ]', {
+                fontSize: '14px', color: '#888'
+            }).setOrigin(0.5).setDepth(4010).setAlpha(0);
+            this.tweens.add({ targets: cont, alpha: 0.6, duration: 500, delay: 2000 });
+            this.tweens.add({ targets: cont, alpha: 0.3, duration: 600, yoyo: true, repeat: -1, delay: 2500 });
+
+            // Click to proceed
+            this.time.delayedCall(2000, () => {
+                this.input.once('pointerdown', () => {
+                    this.tweens.add({
+                        targets: [ov, spotlight, bigFairy, bigHat, staff, title, cont],
+                        alpha: 0, duration: 600,
+                        onComplete: () => this.chapterDone()
+                    });
+                });
             });
         });
     }
@@ -1273,7 +1840,8 @@ class Chapter3Scene extends Phaser.Scene {
     update() {
         if (!this.player || !this.player.body) return;
         if (this.cooldown > 0) this.cooldown--;
-        if (this._dialogBlocked || (this.phase !== 'fight' && this.phase !== 'findFire')) {
+        const activePhases = ['fight', 'findFire', 'bossFight'];
+        if (this._dialogBlocked || !activePhases.includes(this.phase)) {
             if (this.player.body) this.player.body.setVelocity(0);
             return;
         }
@@ -1287,17 +1855,35 @@ class Chapter3Scene extends Phaser.Scene {
         else if (vx > 0) this.player.setAngle(8);
         else this.player.setAngle(0);
 
-        // Touch fire button — auto-aim at nearest broom
-        if (TOUCH.fire && this.phase === 'fight') {
-            let nearest = null, minDist = Infinity;
-            this.brooms.getChildren().forEach(b => {
-                if (!b.active) return;
-                const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, b.x, b.y);
-                if (d < minDist) { minDist = d; nearest = b; }
-            });
-            if (nearest) this.shootIce({ x: nearest.x, y: nearest.y });
-            else this.shootIce({ x: this.witch ? this.witch.x : W / 2, y: this.witch ? this.witch.y : H / 2 });
+        // Update facing direction when moving
+        if (vx !== 0 || vy !== 0) {
+            this.facingX = vx;
+            this.facingY = vy;
+        }
+
+        // Spacebar shoot — fires in facing direction
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && activePhases.includes(this.phase) && !this._dialogActive) {
+            const dist = 300;
+            this.shootIce({ x: this.player.x + this.facingX * dist, y: this.player.y + this.facingY * dist });
+        }
+
+        // Touch fire button — shoot in facing direction
+        if (TOUCH.fire && activePhases.includes(this.phase)) {
+            const dist = 300;
+            this.shootIce({ x: this.player.x + this.facingX * dist, y: this.player.y + this.facingY * dist });
             TOUCH.fire = false;
+        }
+
+        // Witch boss AI — bounces around and shoots purple orbs
+        if (this.phase === 'bossFight' && this.witch && this.witch.active && this.witchHP > 0) {
+            this.witch.x += this.witchBDir.x;
+            this.witch.y += this.witchBDir.y;
+            if (this.witch.x > W - 40 || this.witch.x < 40) this.witchBDir.x *= -1;
+            if (this.witch.y > H - 80 || this.witch.y < 60) this.witchBDir.y *= -1;
+            this.witchBTimer++;
+            // Shoot every 60 frames (~1 second), faster as HP drops
+            const shootInterval = Math.max(30, 60 - (this.witchMaxHP - this.witchHP) * 4);
+            if (this.witchBTimer > shootInterval) { this.witchBTimer = 0; this.witchShoot(); }
         }
     }
 }
