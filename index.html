@@ -183,7 +183,7 @@ const STATE = {
 const PORTRAITS = {
     'Fairy': { emoji: '🧝‍♂️', color: 0x88ff88, glow: 0x44cc44 },
     'Fire Fairy': { emoji: '🔥', color: 0xff6622, glow: 0xff4400 },
-    'Witch': { emoji: '🧙', color: 0xbb44ff, glow: 0x8822cc },
+    'Witch': { emoji: '🧙‍♀️', color: 0xbb44ff, glow: 0x8822cc },
     'Hat': { emoji: '🎩', color: 0xffdd00, glow: 0xccaa00 },
     'Sun God': { emoji: '☀️', color: 0xffdd00, glow: 0xffaa00 },
 };
@@ -437,8 +437,8 @@ class TitleScene extends Phaser.Scene {
             this.time.delayedCall(500, () => this.scene.start('Chapter1Scene'));
         });
 
-        this.add.text(W / 2, 530, 'Built with love', { fontSize: '13px', color: '#666688' }).setOrigin(0.5);
-        this.add.text(W / 2, 555, 'Happy Birthday Ozan!', { fontSize: '14px', color: '#887799' }).setOrigin(0.5);
+        this.add.text(W / 2, 530, 'Built with love by Uncle Berkin', { fontSize: '13px', color: '#666688' }).setOrigin(0.5);
+        this.add.text(W / 2, 555, 'Happy Birthday Ozzie!', { fontSize: '14px', color: '#887799' }).setOrigin(0.5);
     }
 }
 
@@ -566,7 +566,7 @@ class Chapter1Scene extends Phaser.Scene {
         this.hudLabel = this.add.text(10, 10, 'Chapter 1: Fire Fairy Castle', {
             fontSize: '14px', color: '#ffdd88', fontStyle: 'bold'
         }).setDepth(1000);
-        this.hudSub = this.add.text(10, 28, TOUCH.active ? 'Use the D-pad to move' : 'Arrow keys / WASD to move', {
+        this.hudSub = this.add.text(10, 28, TOUCH.active ? 'Use the joystick to move' : 'Arrow keys / WASD to move', {
             fontSize: '11px', color: '#aaaaaa'
         }).setDepth(1000);
         this.crystalHud = this.add.text(W - 10, 10, '💎 0 / 5', {
@@ -578,7 +578,7 @@ class Chapter1Scene extends Phaser.Scene {
             showDialog(this, [
                 { speaker: 'Fairy', text: 'Two castles! The Fire Fairy Castle and the Ice Fairy Castle!' },
                 { speaker: 'Fairy', text: "The Fire Castle door is locked! I need to find 5 magical crystals hidden in the forest to unlock it." },
-                TOUCH.active ? 'Use the D-pad to move. Collect all 💎 crystals to unlock the castle door!' : 'Use arrow keys or WASD to move. Collect all 💎 crystals to unlock the castle door!'
+                TOUCH.active ? 'Use the joystick to move. Collect all 💎 crystals to unlock the castle door!' : 'Use arrow keys or WASD to move. Collect all 💎 crystals to unlock the castle door!'
             ]);
         });
     }
@@ -1190,7 +1190,7 @@ class Chapter2Scene extends Phaser.Scene {
                 { speaker: 'Fairy', text: 'I teleported behind the Ice Fairy Castle!' },
                 { speaker: 'Fire Fairy', text: 'You stole our powers! I will stop you!' },
                 { speaker: 'Fairy', text: "I'll fight her with fireballs!" },
-                TOUCH.active ? 'Use the D-pad to move and the fire button to shoot in the direction you\'re moving!' : 'Use WASD to move. Press SPACE to shoot in the direction you\'re moving, or click to aim!'
+                TOUCH.active ? 'Move with the joystick. Tap 🔥 to shoot — it auto-aims at enemies! Hold to keep firing.' : 'Use WASD to move. Press SPACE to shoot in the direction you\'re moving, or click to aim!'
             ], () => { this.phase = 'fight'; });
         });
     }
@@ -1367,11 +1367,18 @@ class Chapter2Scene extends Phaser.Scene {
             this.shoot({ x: this.player.x + this.facingX * dist, y: this.player.y + this.facingY * dist });
         }
 
-        // Touch fire button — shoot in facing direction
-        if (TOUCH.fire && this.phase === 'fight' && this.boss && this.boss.active && this.bossHP > 0) {
-            const dist = 300;
-            this.shoot({ x: this.player.x + this.facingX * dist, y: this.player.y + this.facingY * dist });
-            TOUCH.fire = false;
+        // Touch fire button — AUTO-AIM at the boss. Hold to continuously fire; cooldown paces it.
+        if (TOUCH.fire && this.phase === 'fight' && this.cooldown <= 0) {
+            let target;
+            if (this.boss && this.boss.active && this.bossHP > 0) {
+                target = { x: this.boss.x, y: this.boss.y };
+            } else {
+                const dist = 300;
+                const fx = this.facingX || 0, fy = this.facingY || -1;
+                target = { x: this.player.x + fx * dist, y: this.player.y + fy * dist };
+            }
+            this.shoot(target);
+            // keep TOUCH.fire true so player can hold; cooldown paces the fire
         }
 
         // Trail
@@ -1453,6 +1460,11 @@ class Chapter3Scene extends Phaser.Scene {
         this.witch.add(this.add.rectangle(20, 0, 4, 50, 0x8B4513));
         this.witch.add(this.add.circle(20, -24, 6, 0xaa44ff));
         this.witch.setDepth(80);
+        // Give witch a physics body so projectile overlaps work
+        this.physics.add.existing(this.witch);
+        this.witch.body.setSize(44, 50).setOffset(-22, -30);
+        this.witch.body.setAllowGravity(false);
+        this.witch.body.setImmovable(true);
         this.tweens.add({ targets: this.witch, y: this.witch.y - 5, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
         // Witch teleports to random positions during fight
         this.witchMoveTimer = this.time.addEvent({
@@ -1515,7 +1527,7 @@ class Chapter3Scene extends Phaser.Scene {
                 { speaker: 'Fairy', text: "I'm at the top of the tower!" },
                 { speaker: 'Witch', text: 'Hehehe! No one enters MY tower! Take this!' },
                 { speaker: 'Fairy', text: "She's sending brooms! I'll freeze them with ice!" },
-                TOUCH.active ? 'Use the D-pad to move and the fire button to shoot in the direction you\'re moving!' : 'Use WASD to move. Press SPACE to shoot in the direction you\'re moving, or click to aim!'
+                TOUCH.active ? 'Move with the joystick. Tap 🔥 to shoot — it auto-aims at enemies! Hold to keep firing.' : 'Use WASD to move. Press SPACE to shoot in the direction you\'re moving, or click to aim!'
             ], () => { this.phase = 'fight'; this.launchBroom(); });
         });
     }
@@ -1663,7 +1675,7 @@ class Chapter3Scene extends Phaser.Scene {
             showDialog(this, [
                 { speaker: 'Fairy', text: "The fire gave me power! Now I can fight the witch directly!" },
                 { speaker: 'Witch', text: "You think a little fire can stop ME?! Come and fight!" },
-                TOUCH.active ? 'Boss fight! Use D-pad to dodge and fire button to shoot!' : 'Boss fight! Use WASD to dodge, SPACE or click to shoot!'
+                TOUCH.active ? 'Boss fight! Joystick to dodge. Hold 🔥 — it auto-targets the witch!' : 'Boss fight! Use WASD to dodge, SPACE or click to shoot!'
             ], () => this.startWitchBoss());
         });
     }
@@ -1684,21 +1696,9 @@ class Chapter3Scene extends Phaser.Scene {
         this.broomText.setText('Witch: ' + '🟣'.repeat(this.witchHP));
         this.hpText.setText('You: ' + '❤️'.repeat(Math.max(0, this.playerHP)));
 
-        // Player bullets hit witch
+        // Player bullets hit witch (physics overlap)
         this.physics.add.overlap(this.iceBalls, this.witch, (witch, b) => {
-            if (this.phase !== 'bossFight') return;
-            b.destroy();
-            this.witchHP--;
-            sparkles(this, this.witch.x, this.witch.y, 8, 0xaa44ff);
-            this.cameras.main.shake(100, 0.005);
-            this.broomText.setText('Witch: ' + '🟣'.repeat(Math.max(0, this.witchHP)) + '⬛'.repeat(Math.max(0, this.witchMaxHP - this.witchHP)));
-            // Witch flash red
-            if (this.witch && this.witch.active) {
-                this.tweens.add({ targets: this.witch, alpha: 0.3, duration: 80, yoyo: true, repeat: 2 });
-            }
-            if (this.witchHP <= 0) {
-                this.witchDead();
-            }
+            this.witchTakeHit(b);
         });
 
         // Witch bullets hit player
@@ -1714,6 +1714,22 @@ class Chapter3Scene extends Phaser.Scene {
                 showDialog(this, ['The witch got you!', "Let's try again!"], () => this.scene.restart());
             }
         });
+    }
+
+    witchTakeHit(bullet) {
+        if (this.phase !== 'bossFight') return;
+        if (!this.witch || !this.witch.active) return;
+        if (bullet && bullet.active) bullet.destroy();
+        this.witchHP--;
+        sparkles(this, this.witch.x, this.witch.y, 8, 0xaa44ff);
+        this.cameras.main.shake(100, 0.005);
+        this.broomText.setText('Witch: ' + '🟣'.repeat(Math.max(0, this.witchHP)) + '⬛'.repeat(Math.max(0, this.witchMaxHP - this.witchHP)));
+        if (this.witch && this.witch.active) {
+            this.tweens.add({ targets: this.witch, alpha: 0.3, duration: 80, yoyo: true, repeat: 2 });
+        }
+        if (this.witchHP <= 0) {
+            this.witchDead();
+        }
     }
 
     witchShoot() {
@@ -1934,11 +1950,33 @@ class Chapter3Scene extends Phaser.Scene {
             this.shootIce({ x: this.player.x + this.facingX * dist, y: this.player.y + this.facingY * dist });
         }
 
-        // Touch fire button — shoot in facing direction
-        if (TOUCH.fire && activePhases.includes(this.phase)) {
-            const dist = 300;
-            this.shootIce({ x: this.player.x + this.facingX * dist, y: this.player.y + this.facingY * dist });
-            TOUCH.fire = false;
+        // Touch fire button — AUTO-AIM at nearest threat (witch in bossFight, or nearest broom).
+        // Falls back to facing direction if no target. Hold to continuously fire; cooldown limits rate.
+        if (TOUCH.fire && activePhases.includes(this.phase) && this.cooldown <= 0) {
+            let target = null;
+            // Priority 1: witch boss
+            if (this.phase === 'bossFight' && this.witch && this.witch.active) {
+                target = { x: this.witch.x, y: this.witch.y };
+            }
+            // Priority 2: nearest unfrozen broom
+            if (!target && this.brooms && this.brooms.getChildren) {
+                let best = null, bestD = Infinity;
+                this.brooms.getChildren().forEach(br => {
+                    if (!br.active || br.alpha < 0.5) return;
+                    const dx = br.x - this.player.x, dy = br.y - this.player.y;
+                    const d = dx * dx + dy * dy;
+                    if (d < bestD) { bestD = d; best = br; }
+                });
+                if (best) target = { x: best.x, y: best.y };
+            }
+            // Priority 3: facing direction fallback
+            if (!target) {
+                const dist = 300;
+                const fx = this.facingX || 0, fy = this.facingY || -1;
+                target = { x: this.player.x + fx * dist, y: this.player.y + fy * dist };
+            }
+            this.shootIce(target);
+            // keep TOUCH.fire true so player can hold; cooldown paces the fire
         }
 
         // Witch boss AI — bounces around and shoots purple orbs
@@ -1951,6 +1989,18 @@ class Chapter3Scene extends Phaser.Scene {
             // Shoot every 60 frames (~1 second), faster as HP drops
             const shootInterval = Math.max(30, 60 - (this.witchMaxHP - this.witchHP) * 4);
             if (this.witchBTimer > shootInterval) { this.witchBTimer = 0; this.witchShoot(); }
+
+            // MANUAL hit detection — guarantees bullets connect regardless of container physics quirks
+            const hitRadius = 32;
+            if (this.iceBalls && this.iceBalls.getChildren) {
+                this.iceBalls.getChildren().forEach(b => {
+                    if (!b.active) return;
+                    const dx = b.x - this.witch.x, dy = b.y - this.witch.y;
+                    if (dx * dx + dy * dy < hitRadius * hitRadius) {
+                        this.witchTakeHit(b);
+                    }
+                });
+            }
         }
     }
 }
@@ -2003,8 +2053,8 @@ class EndScene extends Phaser.Scene {
         this.add.text(W / 2, 470, 'Game Designed by Ozan', {
             fontSize: '22px', fontFamily: 'Georgia', color: '#ffdd88', fontStyle: 'bold'
         }).setOrigin(0.5);
-        this.add.text(W / 2, 505, 'Built with love', { fontSize: '16px', color: '#8888aa' }).setOrigin(0.5);
-        this.add.text(W / 2, 535, 'Happy Birthday Ozan!', { fontSize: '18px', color: '#ff88aa' }).setOrigin(0.5);
+        this.add.text(W / 2, 505, 'Built with love by Uncle Berkin', { fontSize: '16px', color: '#8888aa' }).setOrigin(0.5);
+        this.add.text(W / 2, 535, 'Happy Birthday Ozzie!', { fontSize: '18px', color: '#ff88aa' }).setOrigin(0.5);
 
         const btn = this.add.rectangle(W / 2, H - 30, 160, 35, 0x44aa44, 0.8)
             .setStrokeStyle(2, 0x66cc66).setInteractive({ useHandCursor: true });
